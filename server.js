@@ -474,6 +474,14 @@ try {
   allQuizzes = FALLBACK_QUIZZES;
 }
 
+// Always sanitize quizzes dynamically to remove any '나무위키'
+allQuizzes = allQuizzes.map(q => {
+  let exp = q.explanation || '';
+  exp = exp.replace(/^나무위키\s*\[.*?\]\s*:\s*/g, '');
+  exp = exp.replace(/나무위키/g, '맞춤법 규정');
+  return { ...q, explanation: exp.trim(), source: '바른 국어 맞춤법' };
+});
+
 // In-Memory State
 const clients = new Map(); // userId -> { res, userId, nickname, lastSeen }
 const waitingQueue = []; // [{ userId, nickname, rp, queuedAt, botTimer }]
@@ -1132,14 +1140,37 @@ const server = http.createServer((req, res) => {
     }
   }
 
+  // Function to send HTML with guaranteed footer injection and no-cache
+  function sendHtmlWithFooter(htmlStr) {
+    let out = htmlStr;
+    if (!out.includes('made by 하하하하하쌤')) {
+      const footerTag = `\n    <!-- Game Footer -->\n    <footer class="game-footer" style="text-align: center; padding: 12px 16px; font-size: 14px; color: #64748b; background: #f8fafc; border-top: 2px solid #e2e8f0; display: flex; align-items: center; justify-content: center; gap: 8px; z-index: 20; margin-top: auto;">\n      <span>💧 워터팡! 초등 맞춤법 배틀</span>\n      <span style="opacity: 0.5;">·</span>\n      <span style="color: #0284c7; font-weight: 800;">made by 하하하하하쌤</span>\n    </footer>\n  </div>`;
+      out = out.replace(/<\/div>\s*<!-- Scripts -->/, footerTag + '\n\n  <!-- Scripts -->');
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    res.end(out);
+  }
+
   if (foundDiskPath) {
     fs.readFile(foundDiskPath, (err, content) => {
       if (err) {
         res.writeHead(500);
         res.end('Server Error');
       } else {
-        res.writeHead(200, { 'Content-Type': contentType });
-        res.end(content);
+        if (ext === '.html') {
+          sendHtmlWithFooter(content.toString('utf8'));
+        } else {
+          res.writeHead(200, {
+            'Content-Type': contentType,
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          });
+          res.end(content);
+        }
       }
     });
     return;
@@ -1147,15 +1178,21 @@ const server = http.createServer((req, res) => {
 
   // If not on disk, check Embedded Assets
   if (EMBEDDED_FILES[normPath]) {
-    res.writeHead(200, { 'Content-Type': EMBEDDED_FILES[normPath].type });
-    res.end(EMBEDDED_FILES[normPath].content);
+    if (ext === '.html') {
+      sendHtmlWithFooter(EMBEDDED_FILES[normPath].content);
+    } else {
+      res.writeHead(200, {
+        'Content-Type': EMBEDDED_FILES[normPath].type,
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      res.end(EMBEDDED_FILES[normPath].content);
+    }
     return;
   }
 
   // SPA fallback to /index.html
   if (EMBEDDED_FILES['/index.html']) {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(EMBEDDED_FILES['/index.html'].content);
+    sendHtmlWithFooter(EMBEDDED_FILES['/index.html'].content);
     return;
   }
 
