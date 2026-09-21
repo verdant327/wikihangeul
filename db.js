@@ -562,7 +562,7 @@ function getUserByNickname(nickname) {
   const user = stmt.get(clean);
   if (user) {
     user.tier = getTierInfo(user.rp);
-    user.season = user.season || 2;
+    user.season = user.season || 3;
   }
   return user;
 }
@@ -581,7 +581,7 @@ function getUserById(id) {
   const user = stmt.get(id);
   if (user) {
     user.tier = getTierInfo(user.rp);
-    user.season = user.season || 2;
+    user.season = user.season || 3;
   }
   return user;
 }
@@ -685,10 +685,10 @@ function getMatchHistory(userId, limit = 10) {
   return stmt.all(userId, limit);
 }
 
-// Season 2 Leaderboard (Active)
+// Season 3 Leaderboard (Active)
 function getLeaderboard(limit = null) {
   if (useJsonFallback) {
-    const validUsers = (jsonStore.users || []).filter(u => u && u.nickname && !isProhibitedNickname(u.nickname, u.id).prohibited && (u.season === 2 || !u.season));
+    const validUsers = (jsonStore.users || []).filter(u => u && u.nickname && !isProhibitedNickname(u.nickname, u.id).prohibited && (u.season === 3 || u.season === 2 || !u.season));
     const sorted = [...validUsers].sort((a, b) => {
       if (b.rp !== a.rp) return b.rp - a.rp;
       return b.wins - a.wins;
@@ -868,11 +868,11 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
     let newLosses = existing.losses;
     let newDraws = existing.draws;
 
-    // Only allow Season 2 points to update Season 2 users!
-    // Never let old Season 1 2000 RP overwrite Season 2 baseline, and NEVER downgrade!
-    const isSeason2 = (userData.season === 3 || (userData.season === 3 || userData.season === 2));
+    // Allow Season 3 & 2 points to update users!
+    // Absolute Anti-Downgrade: NEVER downgrade RP, wins, losses, draws!
+    const isCurrentSeason = (userData.season === 3 || userData.season === 2 || !userData.season);
 
-    if (isSeason2) {
+    if (isCurrentSeason) {
       if (typeof userData.rp === 'number' && userData.rp > existing.rp) {
         newRp = userData.rp;
         needsUpdate = true;
@@ -912,7 +912,7 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
   } else {
     const id = userData.id || crypto.randomUUID();
     const password = userData.password || '1234';
-    // If incoming user is from Season 1 without season=2, start Season 2 at 100 RP!
+    // If incoming user is from Season 1 without season=2/3, start Season 3 at 100 RP!
     const rp = ((userData.season === 3 || userData.season === 2) && typeof userData.rp === 'number') ? userData.rp : 100;
     const wins = ((userData.season === 3 || userData.season === 2) && typeof userData.wins === 'number') ? userData.wins : 0;
     const losses = ((userData.season === 3 || userData.season === 2) && typeof userData.losses === 'number') ? userData.losses : 0;
@@ -952,11 +952,11 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
         const nick = item.nickname.trim();
         if (isProhibitedNickname(nick, item.id).prohibited) continue;
 
-        const isItemS2 = (item.season === 2);
-        const peerRp = (isItemS2 && typeof item.rp === 'number') ? item.rp : 100;
-        const peerWins = (isItemS2 && typeof item.wins === 'number') ? item.wins : 0;
-        const peerLosses = (isItemS2 && typeof item.losses === 'number') ? item.losses : 0;
-        const peerDraws = (isItemS2 && typeof item.draws === 'number') ? item.draws : 0;
+        const isItemValid = (item.season === 3 || item.season === 2 || !item.season);
+        const peerRp = (isItemValid && typeof item.rp === 'number') ? item.rp : 100;
+        const peerWins = (isItemValid && typeof item.wins === 'number') ? item.wins : 0;
+        const peerLosses = (isItemValid && typeof item.losses === 'number') ? item.losses : 0;
+        const peerDraws = (isItemValid && typeof item.draws === 'number') ? item.draws : 0;
 
         const found = getUserByNickname(nick);
         if (!found) {
@@ -982,7 +982,7 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
               stmt.run(lId, nick, 'saved_user', peerRp, peerWins, peerLosses, peerDraws);
             } catch (e) {}
           }
-        } else if (isItemS2) {
+        } else if (isItemValid) {
           // Absolute Max Merge: Never allow older snapshot to downgrade a peer's RP!
           const higherRp = Math.max(found.rp, peerRp);
           const higherWins = Math.max(found.wins, peerWins);

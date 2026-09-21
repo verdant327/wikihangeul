@@ -190,18 +190,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const prevParsed = JSON.parse(prevSaved);
         if (prevParsed && prevParsed.nickname) {
           console.log('[Season 3] Migrating account to Season 3:', prevParsed.nickname);
+          const s3Rp = (typeof prevParsed.rp === 'number' && prevParsed.rp >= 100) ? prevParsed.rp : 100;
+          const s3Wins = (typeof prevParsed.wins === 'number') ? prevParsed.wins : 0;
+          const s3Losses = (typeof prevParsed.losses === 'number') ? prevParsed.losses : 0;
+          const s3Draws = (typeof prevParsed.draws === 'number') ? prevParsed.draws : 0;
           const s3User = {
             id: prevParsed.id || ('user_' + Math.random().toString(36).substring(2, 9)),
             nickname: prevParsed.nickname,
             password: prevParsed.password || 'saved_user',
-            rp: 100,
-            wins: 0,
-            losses: 0,
-            draws: 0,
+            rp: s3Rp,
+            wins: s3Wins,
+            losses: s3Losses,
+            draws: s3Draws,
             season: 3,
-            season1_rp: prevParsed.season1_rp || prevParsed.rp || 100,
+            season1_rp: prevParsed.season1_rp || 100,
             avatar: prevParsed.avatar || '👦',
-            tier: getTierInfo(100)
+            tier: getTierInfo(s3Rp)
           };
           localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(s3User));
           saved = JSON.stringify(s3User);
@@ -210,6 +214,24 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('Legacy migration error:', e);
       }
     }
+  } else {
+    // If user already has Season 3 saved session, verify if Season 2 key had higher RP and resurrect!
+    try {
+      const prevS2 = localStorage.getItem(STORAGE_KEYS.LEGACY_S2_USER);
+      if (prevS2) {
+        const p2 = JSON.parse(prevS2);
+        const cur = JSON.parse(saved);
+        if (p2 && cur && p2.nickname === cur.nickname && typeof p2.rp === 'number' && p2.rp > cur.rp) {
+          console.log(`[Season 3] Resurrecting higher RP from previous session: ${cur.rp} -> ${p2.rp}`);
+          cur.rp = p2.rp;
+          cur.wins = Math.max(cur.wins || 0, p2.wins || 0);
+          cur.losses = Math.max(cur.losses || 0, p2.losses || 0);
+          cur.tier = getTierInfo(cur.rp);
+          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(cur));
+          saved = JSON.stringify(cur);
+        }
+      }
+    } catch (e) {}
   }
 
   if (saved) {
@@ -306,9 +328,9 @@ function setupEventListeners() {
         let backupUser = null;
         let leaderboardSnapshot = [];
         try {
-          const u = localStorage.getItem(STORAGE_KEYS.USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
+          const u = localStorage.getItem(STORAGE_KEYS.USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_S2_USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
           if (u) backupUser = JSON.parse(u);
-          const lb = localStorage.getItem(STORAGE_KEYS.LEADERBOARD) || localStorage.getItem(STORAGE_KEYS.LEGACY_LEADERBOARD);
+          const lb = localStorage.getItem(STORAGE_KEYS.LEADERBOARD) || localStorage.getItem(STORAGE_KEYS.LEGACY_S2_LEADERBOARD) || localStorage.getItem(STORAGE_KEYS.LEGACY_LEADERBOARD);
           if (lb) leaderboardSnapshot = JSON.parse(lb);
         } catch(e){}
 
@@ -328,9 +350,9 @@ function setupEventListeners() {
         let backupUser = null;
         let leaderboardSnapshot = [];
         try {
-          const u = localStorage.getItem(STORAGE_KEYS.USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
+          const u = localStorage.getItem(STORAGE_KEYS.USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_S2_USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
           if (u) backupUser = JSON.parse(u);
-          const lb = localStorage.getItem(STORAGE_KEYS.LEADERBOARD) || localStorage.getItem(STORAGE_KEYS.LEGACY_LEADERBOARD);
+          const lb = localStorage.getItem(STORAGE_KEYS.LEADERBOARD) || localStorage.getItem(STORAGE_KEYS.LEGACY_S2_LEADERBOARD) || localStorage.getItem(STORAGE_KEYS.LEGACY_LEADERBOARD);
           if (lb) leaderboardSnapshot = JSON.parse(lb);
         } catch(e){}
 
@@ -389,6 +411,17 @@ function updateUserData(user) {
 }
 
 function loginSuccess(user) {
+  // Anti-downgrade shield on login: If local currentUser has higher RP, preserve it!
+  if (currentUser && currentUser.nickname === user.nickname) {
+    if (typeof currentUser.rp === 'number' && currentUser.rp > (user.rp || 0)) {
+      console.log(`[Auth] Preserving higher local RP on login: ${currentUser.rp} vs server ${user.rp}`);
+      user.rp = currentUser.rp;
+      user.wins = Math.max(user.wins || 0, currentUser.wins || 0);
+      user.losses = Math.max(user.losses || 0, currentUser.losses || 0);
+      user.draws = Math.max(user.draws || 0, currentUser.draws || 0);
+      user.tier = getTierInfo(user.rp);
+    }
+  }
   updateUserData(user);
   showView('lobby');
 
@@ -397,7 +430,7 @@ function loginSuccess(user) {
 
   // Auto-sync and cache leaderboard in background
   syncUserWithServer(user);
-  refreshLeaderboardCache();
+  refreshLeaderboardCache(true);
 }
 
 function logout() {
@@ -446,8 +479,20 @@ async function syncUserWithServer(userToSync) {
 async function fetchProfile(userId) {
   try {
     const res = await fetch(`/api/profile?userId=${userId}&_t=${Date.now()}`);
+    if (!res.ok) {
+      // 404 or server error (e.g. ephemeral restart): immediately resurrect account on server!
+      if (currentUser) {
+        console.warn(`[Profile] Server returned ${res.status}. Resurrecting account with server...`);
+        await syncUserWithServer(currentUser);
+      }
+      return;
+    }
     const data = await res.json();
     if (data.ok && data.user) {
+      // Shield against dummy '학생' nickname or lower RP
+      if (data.user.nickname === '학생' && currentUser && currentUser.nickname && currentUser.nickname !== '학생') {
+        data.user.nickname = currentUser.nickname;
+      }
       // Anti-downgrade shield: Protect local verified RP from lower server value
       if (currentUser && typeof currentUser.rp === 'number') {
         if (data.user.rp < currentUser.rp) {
@@ -458,7 +503,7 @@ async function fetchProfile(userId) {
       }
       updateUserData(data.user);
     } else if (currentUser) {
-      // Container restarted on Render! Automatically sync and resurrect account
+      // Container restarted on Koyeb/Render! Automatically sync and resurrect account
       await syncUserWithServer(currentUser);
     }
   } catch (err) {
@@ -1084,9 +1129,50 @@ function onMatchOver(data) {
     // Keep currentUser in sync
     if (currentUser) {
       currentUser.rp = currentTotalRp;
+      if (myResult.result === 'WIN') {
+        currentUser.wins = (currentUser.wins || 0) + 1;
+      } else if (myResult.result === 'LOSE') {
+        currentUser.losses = (currentUser.losses || 0) + 1;
+      } else {
+        currentUser.draws = (currentUser.draws || 0) + 1;
+      }
+      currentUser.tier = getTierInfo(currentTotalRp);
       try {
         localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(currentUser));
         updateUserData(currentUser);
+
+        // Update in cached leaderboard snapshot immediately
+        let cachedLb = [];
+        try {
+          const rawLb = localStorage.getItem(STORAGE_KEYS.LEADERBOARD);
+          if (rawLb) cachedLb = JSON.parse(rawLb);
+        } catch (e) {}
+        if (Array.isArray(cachedLb)) {
+          const idx = cachedLb.findIndex(u => (u.nickname && u.nickname === currentUser.nickname) || (u.id && u.id === currentUser.id));
+          const total = (currentUser.wins || 0) + (currentUser.losses || 0);
+          const rate = total > 0 ? (((currentUser.wins || 0) / total) * 100).toFixed(1) : '0.0';
+          const updatedItem = {
+            id: currentUser.id,
+            nickname: currentUser.nickname,
+            rp: currentUser.rp,
+            wins: currentUser.wins || 0,
+            losses: currentUser.losses || 0,
+            draws: currentUser.draws || 0,
+            win_rate: rate,
+            tier: currentUser.tier,
+            season: 3
+          };
+          if (idx !== -1) {
+            cachedLb[idx] = updatedItem;
+          } else {
+            cachedLb.push(updatedItem);
+          }
+          cachedLb.sort((a, b) => (b.rp !== a.rp ? b.rp - a.rp : b.wins - a.wins));
+          localStorage.setItem(STORAGE_KEYS.LEADERBOARD, JSON.stringify(cachedLb));
+        }
+
+        // Proactively sync latest match result to server right away!
+        syncUserWithServer(currentUser);
       } catch (e) {}
     }
 
@@ -1331,8 +1417,20 @@ async function openLeaderboard() {
     if (data.ok && data.leaderboard) {
       if (data.leaderboard.length > 0) {
         lastLeaderboardFetch = Date.now();
-        localStorage.setItem(STORAGE_KEYS.LEADERBOARD, JSON.stringify(data.leaderboard));
-        renderLeaderboardItems(data.leaderboard, container);
+        let list = data.leaderboard;
+        if (currentUser && Array.isArray(list)) {
+          const myEntry = list.find(u => (u.nickname && u.nickname === currentUser.nickname) || (u.id && u.id === currentUser.id));
+          if (myEntry) {
+            if (typeof currentUser.rp === 'number' && currentUser.rp > myEntry.rp) {
+              myEntry.rp = currentUser.rp;
+              myEntry.wins = Math.max(myEntry.wins || 0, currentUser.wins || 0);
+              myEntry.tier = getTierInfo(myEntry.rp);
+            }
+          }
+          list.sort((a, b) => (b.rp !== a.rp ? b.rp - a.rp : b.wins - a.wins));
+        }
+        localStorage.setItem(STORAGE_KEYS.LEADERBOARD, JSON.stringify(list));
+        renderLeaderboardItems(list, container);
         setTimeout(() => {
           const myRow = document.getElementById('my-leaderboard-row');
           if (myRow) myRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
