@@ -675,14 +675,31 @@ function onMatchFound(data) {
   const myData = isMeP1 ? data.p1 : data.p2;
   const oppData = isMeP1 ? data.p2 : data.p1;
 
+  // Local leaderboard rank resolver fallback
+  function getCachedRank(playerObj) {
+    if (!playerObj) return null;
+    if (playerObj.rank) return playerObj.rank;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.LEADERBOARD);
+      if (!raw) return null;
+      const lb = JSON.parse(raw);
+      if (!Array.isArray(lb)) return null;
+      const idx = lb.findIndex(u => (playerObj.id && u.id === playerObj.id) || (playerObj.nickname && u.nickname === playerObj.nickname));
+      return idx !== -1 ? (idx + 1) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // Rank display next to nickname (No robot emoji)
-  const myRank = myData.rank || (currentUser && currentUser.rank);
+  const myRank = myData.rank || (currentUser && currentUser.rank) || getCachedRank(myData) || getCachedRank(currentUser);
   const myRankText = myRank ? ` (${myRank}위)` : '';
   document.getElementById('name-p1').innerText = `${myData.nickname}${myRankText} (나)`;
   const av1 = document.getElementById('avatar-p1');
   if (av1 && av1.childNodes[0]) av1.childNodes[0].nodeValue = myData.avatar || '👦';
 
-  const oppRankText = oppData.isBot ? ' (연습봇)' : (oppData.rank ? ` (${oppData.rank}위)` : '');
+  const oppRank = oppData.rank || getCachedRank(oppData);
+  const oppRankText = oppData.isBot ? ' (연습봇)' : (oppRank ? ` (${oppRank}위)` : '');
   document.getElementById('name-p2').innerText = `${oppData.nickname}${oppRankText}`;
   const av2 = document.getElementById('avatar-p2');
   if (av2 && av2.childNodes[0]) av2.childNodes[0].nodeValue = oppData.avatar || (oppData.isBot ? '🤖' : '👧');
@@ -784,7 +801,11 @@ function onRoundStart(data) {
     const container = document.getElementById('quiz-options-container');
     if (container) {
       container.innerHTML = '';
-      (data.quiz.options || []).forEach(opt => {
+      let opts = Array.isArray(data.quiz.options) ? [...data.quiz.options] : [];
+      if (opts.length >= 2 && opts[0].trim() === opts[1].trim()) {
+        opts[1] = opts[0] + ' (오답)';
+      }
+      opts.forEach(opt => {
         const btn = document.createElement('button');
         btn.className = 'btn-option';
         btn.innerText = opt;

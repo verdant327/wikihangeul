@@ -1019,10 +1019,10 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
 }
 
 
-function getUserRank(userId) {
-  if (!userId) return null;
+function getUserRank(userId, nickname = null) {
+  if (!userId && !nickname) return null;
   const lb = getLeaderboard(5000);
-  const idx = lb.findIndex(u => u.id === userId);
+  const idx = lb.findIndex(u => (userId && (u.id === userId || u.nickname === userId)) || (nickname && u.nickname === nickname));
   return idx !== -1 ? (idx + 1) : null;
 }
 
