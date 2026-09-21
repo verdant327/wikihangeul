@@ -132,14 +132,16 @@ function isProhibitedNickname(nickname, userId = null) {
 
   const clean = nickname.replace(/[\s_.,~!@#$%^&*()=+/\\|?:;'"<>-]/g, '').toLowerCase();
 
-  // Teacher account exemption: Only the authentic teacher account is allowed
-  if (userId && userId === TEACHER_ACCOUNT.id && nickname.trim() === TEACHER_ACCOUNT.nickname) {
+  // Authentic teacher account is allowed (Server will verify the teacher password: 990327)
+  if (nickname.trim() === TEACHER_ACCOUNT.nickname) {
     return { prohibited: false };
   }
 
   // Teacher / Admin impersonation check (Blocks all unauthorized teacher/admin accounts)
   if (clean.includes('하하하하하쌤') || /하하하+쌤/.test(clean) || /하하하+선생(?:님)?(?:$|[0-9_])/.test(clean) || /\[?(?:gm|관리자|운영자)\]?/i.test(nickname)) {
-    return { prohibited: true, matched: '선생님/관리자 사칭 방지' };
+    if (userId !== TEACHER_ACCOUNT.id) {
+      return { prohibited: true, matched: '선생님/관리자 사칭 방지' };
+    }
   }
 
   for (const word of PROHIBITED_KEYWORDS) {

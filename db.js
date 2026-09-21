@@ -70,7 +70,8 @@ const EMOJI_REGEX = /[\u{1F000}-\u{1FAFF}\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\
 
 const TEACHER_ACCOUNT = {
   id: '01fdd103-ef91-43d5-b0d5-8f1867d98c3e',
-  nickname: '하하하하하쌤'
+  nickname: '하하하하하쌤',
+  password: '990327'
 };
 
 function isProhibitedNickname(nickname, userId = null) {
@@ -83,14 +84,18 @@ function isProhibitedNickname(nickname, userId = null) {
 
   const clean = nickname.replace(/[\s_.,~!@#$%^&*()=+/\\|?:;'"<>-]/g, '').toLowerCase();
 
-  // Teacher account exemption: Only the authentic teacher account is allowed
-  if (userId && userId === TEACHER_ACCOUNT.id && nickname.trim() === TEACHER_ACCOUNT.nickname) {
-    return { prohibited: false };
+  // Authentic teacher account is always exempted from prohibited filters
+  if (nickname.trim() === TEACHER_ACCOUNT.nickname) {
+    if (!userId || userId === TEACHER_ACCOUNT.id) {
+      return { prohibited: false };
+    }
   }
 
   // Teacher / Admin impersonation check (Blocks all unauthorized teacher/admin accounts)
   if (clean.includes('하하하하하쌤') || /하하하+쌤/.test(clean) || /하하하+선생(?:님)?(?:$|[0-9_])/.test(clean) || /\[?(?:gm|관리자|운영자)\]?/i.test(nickname)) {
-    return { prohibited: true, matched: '선생님/관리자 사칭 방지' };
+    if (userId !== TEACHER_ACCOUNT.id) {
+      return { prohibited: true, matched: '선생님/관리자 사칭 방지' };
+    }
   }
 
   for (const word of PROHIBITED_KEYWORDS) {
@@ -212,6 +217,51 @@ function sanitizeProhibitedUsers() {
     console.error('[DB-Sanitize] Error during prohibited user sweep:', e.message);
   }
   return purgedCount;
+}
+
+function ensureTeacherAccount() {
+  try {
+    if (useJsonFallback) {
+      if (!jsonStore.users) jsonStore.users = [];
+      let t = jsonStore.users.find(u => u.nickname === TEACHER_ACCOUNT.nickname);
+      if (!t) {
+        jsonStore.users.push({
+          id: TEACHER_ACCOUNT.id,
+          nickname: TEACHER_ACCOUNT.nickname,
+          password: TEACHER_ACCOUNT.password,
+          rp: 100,
+          wins: 0,
+          losses: 0,
+          draws: 0,
+          season: 2,
+          season1_rp: 100,
+          season1_rank: 0,
+          avatar: '👨‍🏫',
+          created_at: new Date().toISOString()
+        });
+      } else {
+        t.id = TEACHER_ACCOUNT.id;
+        t.password = TEACHER_ACCOUNT.password;
+        t.season = 2;
+      }
+      saveJsonStore();
+    } else {
+      const existing = db.prepare('SELECT id, nickname, password FROM users WHERE nickname = ?').get(TEACHER_ACCOUNT.nickname);
+      if (!existing) {
+        db.prepare(`
+          INSERT INTO users (id, nickname, password, rp, wins, losses, draws, season, season1_rp, season1_rank, created_at)
+          VALUES (?, ?, ?, 100, 0, 0, 0, 2, 100, 0, datetime('now', 'localtime'))
+        `).run(TEACHER_ACCOUNT.id, TEACHER_ACCOUNT.nickname, TEACHER_ACCOUNT.password);
+        console.log('[DB] 👨‍🏫 Authentic Teacher account created: 하하하하하쌤 (PW: 990327)');
+      } else {
+        db.prepare('UPDATE users SET id = ?, password = ?, season = 2 WHERE nickname = ?')
+          .run(TEACHER_ACCOUNT.id, TEACHER_ACCOUNT.password, TEACHER_ACCOUNT.nickname);
+        console.log('[DB] 👨‍🏫 Authentic Teacher account verified & password synced (PW: 990327)');
+      }
+    }
+  } catch (e) {
+    console.error('[DB] ensureTeacherAccount error:', e.message);
+  }
 }
 
 // -------------------------------------------------------------
@@ -428,6 +478,7 @@ try {
   initTables();
   initSeason2Data();
   sanitizeProhibitedUsers();
+  ensureTeacherAccount();
   console.log('[DB] node:sqlite database initialized successfully at', DB_PATH);
 } catch (err) {
   console.warn('[DB] node:sqlite not available. Switching to persistent JSON store:', err.message);
@@ -435,6 +486,7 @@ try {
   loadJsonStore();
   initSeason2Data();
   sanitizeProhibitedUsers();
+  ensureTeacherAccount();
 }
 
 // -------------------------------------------------------------
@@ -994,5 +1046,7 @@ module.exports = {
   deleteUser,
   sanitizeProhibitedUsers,
   isProhibitedNickname,
-  PROHIBITED_KEYWORDS
+  PROHIBITED_KEYWORDS,
+  ensureTeacherAccount,
+  TEACHER_ACCOUNT
 };
