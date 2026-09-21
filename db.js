@@ -233,7 +233,7 @@ function ensureTeacherAccount() {
           wins: 0,
           losses: 0,
           draws: 0,
-          season: 2,
+          season: 3,
           season1_rp: 100,
           season1_rank: 0,
           avatar: '👨‍🏫',
@@ -242,7 +242,7 @@ function ensureTeacherAccount() {
       } else {
         t.id = TEACHER_ACCOUNT.id;
         t.password = TEACHER_ACCOUNT.password;
-        t.season = 2;
+        t.season = 3;
       }
       saveJsonStore();
     } else {
@@ -250,11 +250,11 @@ function ensureTeacherAccount() {
       if (!existing) {
         db.prepare(`
           INSERT INTO users (id, nickname, password, rp, wins, losses, draws, season, season1_rp, season1_rank, created_at)
-          VALUES (?, ?, ?, 100, 0, 0, 0, 2, 100, 0, datetime('now', 'localtime'))
+          VALUES (?, ?, ?, 100, 0, 0, 0, 3, 100, 0, datetime('now', 'localtime'))
         `).run(TEACHER_ACCOUNT.id, TEACHER_ACCOUNT.nickname, TEACHER_ACCOUNT.password);
         console.log('[DB] 👨‍🏫 Authentic Teacher account created: 하하하하하쌤 (PW: 990327)');
       } else {
-        db.prepare('UPDATE users SET id = ?, password = ?, season = 2 WHERE nickname = ?')
+        db.prepare('UPDATE users SET id = ?, password = ?, season = 3 WHERE nickname = ?')
           .run(TEACHER_ACCOUNT.id, TEACHER_ACCOUNT.password, TEACHER_ACCOUNT.nickname);
         console.log('[DB] 👨‍🏫 Authentic Teacher account verified & password synced (PW: 990327)');
       }
@@ -277,7 +277,7 @@ function initTables() {
       wins INTEGER DEFAULT 0,
       losses INTEGER DEFAULT 0,
       draws INTEGER DEFAULT 0,
-      season INTEGER DEFAULT 2,
+      season INTEGER DEFAULT 3,
       season1_rp INTEGER DEFAULT 100,
       season1_rank INTEGER DEFAULT 0,
       created_at TEXT NOT NULL
@@ -324,7 +324,7 @@ function initTables() {
   `);
 
   // Safe ALTER TABLE migrations for existing databases
-  try { db.exec(`ALTER TABLE users ADD COLUMN season INTEGER DEFAULT 2`); } catch (e) {}
+  try { db.exec(`ALTER TABLE users ADD COLUMN season INTEGER DEFAULT 3`); } catch (e) {}
   try { db.exec(`ALTER TABLE users ADD COLUMN season1_rp INTEGER DEFAULT 100`); } catch (e) {}
   try { db.exec(`ALTER TABLE users ADD COLUMN season1_rank INTEGER DEFAULT 0`); } catch (e) {}
 }
@@ -403,13 +403,13 @@ function initSeason2Data() {
       if (!jsonStore.users) jsonStore.users = [];
       // Transition existing users to Season 2
       jsonStore.users.forEach(u => {
-        if (u.season !== 2) {
+        if (u.season !== 3) {
           u.season1_rp = u.rp || 100;
           u.rp = 100;
           u.wins = 0;
           u.losses = 0;
           u.draws = 0;
-          u.season = 2;
+          u.season = 3;
         }
       });
       // Pre-seed any missing users
@@ -424,7 +424,7 @@ function initSeason2Data() {
               wins: 0,
               losses: 0,
               draws: 0,
-              season: 2,
+              season: 3,
               season1_rp: u.season1_rp || 100,
               season1_rank: u.season1_rank || 0,
               created_at: new Date().toISOString()
@@ -440,7 +440,7 @@ function initSeason2Data() {
         const stmt = db.prepare(`
           INSERT OR IGNORE INTO users 
           (id, nickname, password, rp, wins, losses, draws, season, season1_rp, season1_rank, created_at)
-          VALUES (?, ?, ?, 100, 0, 0, 0, 2, ?, ?, datetime('now', 'localtime'))
+          VALUES (?, ?, ?, 100, 0, 0, 0, 3, ?, ?, datetime('now', 'localtime'))
         `);
         for (const u of seed.season2SeedUsers) {
           stmt.run(u.id, u.nickname, u.password || '1234', u.season1_rp || 100, u.season1_rank || 0);
@@ -449,10 +449,10 @@ function initSeason2Data() {
         console.log(`[DB] ✅ Pre-seeded ${seed.season2SeedUsers.length} user accounts for Season 2!`);
       }
 
-      // Guarantee Season 2 reset is executed exactly once
-      const metaRow = db.prepare("SELECT value FROM season_metadata WHERE key = 'season_reset_v2'").get();
+      // Guarantee Season 3 reset is executed exactly once
+      const metaRow = db.prepare("SELECT value FROM season_metadata WHERE key = 'season_reset_v3'").get();
       if (!metaRow) {
-        console.log('[DB] Performing Season 2 reset on all existing users...');
+        console.log('[DB] Performing Season 3 reset on all existing users...');
         db.exec(`
           UPDATE users 
           SET season1_rp = CASE WHEN season1_rp IS NULL OR season1_rp = 100 THEN rp ELSE season1_rp END,
@@ -460,10 +460,10 @@ function initSeason2Data() {
               wins = 0,
               losses = 0,
               draws = 0,
-              season = 2;
-          INSERT OR REPLACE INTO season_metadata (key, value) VALUES ('season_reset_v2', 'done');
+              season = 3;
+          INSERT OR REPLACE INTO season_metadata (key, value) VALUES ('season_reset_v3', 'done');
         `);
-        console.log('[DB] ✅ All existing users successfully reset to Season 2 (100 RP baseline)!');
+        console.log('[DB] ✅ All existing users successfully reset to Season 3 (100 RP baseline)!');
       }
     }
   } catch (e) {
@@ -523,7 +523,7 @@ function createUser(nickname, password) {
       wins: 0,
       losses: 0,
       draws: 0,
-      season: 2,
+      season: 3,
       created_at: now
     };
     jsonStore.users.push(user);
@@ -534,7 +534,7 @@ function createUser(nickname, password) {
   try {
     const stmt = db.prepare(`
       INSERT INTO users (id, nickname, password, rp, wins, losses, draws, season, created_at)
-      VALUES (?, ?, ?, 100, 0, 0, 0, 2, datetime('now', 'localtime'))
+      VALUES (?, ?, ?, 100, 0, 0, 0, 3, datetime('now', 'localtime'))
     `);
     stmt.run(id, trimmed, password);
   } catch (e) {
@@ -553,7 +553,7 @@ function getUserByNickname(nickname) {
   if (useJsonFallback) {
     const user = jsonStore.users.find(u => u.nickname.trim().toLowerCase() === clean.toLowerCase());
     if (user) {
-      return { ...user, tier: getTierInfo(user.rp), season: user.season || 2 };
+      return { ...user, tier: getTierInfo(user.rp), season: user.season || 3 };
     }
     return null;
   }
@@ -572,7 +572,7 @@ function getUserById(id) {
   if (useJsonFallback) {
     const user = jsonStore.users.find(u => u.id === id);
     if (user) {
-      return { ...user, tier: getTierInfo(user.rp), season: user.season || 2 };
+      return { ...user, tier: getTierInfo(user.rp), season: user.season || 3 };
     }
     return null;
   }
@@ -627,7 +627,7 @@ function updateUserStats(userId, result, rpDelta) {
       jsonStore.users[idx].wins = wins;
       jsonStore.users[idx].losses = losses;
       jsonStore.users[idx].draws = draws;
-      jsonStore.users[idx].season = 2;
+      jsonStore.users[idx].season = 3;
       saveJsonStore();
     }
     return getUserById(userId);
@@ -635,7 +635,7 @@ function updateUserStats(userId, result, rpDelta) {
 
   const stmt = db.prepare(`
     UPDATE users
-    SET rp = ?, wins = ?, losses = ?, draws = ?, season = 2
+    SET rp = ?, wins = ?, losses = ?, draws = ?, season = 3
     WHERE id = ?
   `);
   stmt.run(newRp, wins, losses, draws, userId);
@@ -707,7 +707,7 @@ function getLeaderboard(limit = null) {
         draws: u.draws,
         win_rate: rate,
         tier: getTierInfo(u.rp),
-        season: 2
+        season: 3
       };
     });
   }
@@ -716,13 +716,13 @@ function getLeaderboard(limit = null) {
     ? `SELECT id, nickname, rp, wins, losses, draws,
               ROUND(CAST(wins AS FLOAT) / MAX(1, wins + losses) * 100, 1) as win_rate
        FROM users
-       WHERE season = 2 OR season IS NULL
+       WHERE season >= 2 OR season IS NULL
        ORDER BY rp DESC, wins DESC
        LIMIT ?`
     : `SELECT id, nickname, rp, wins, losses, draws,
               ROUND(CAST(wins AS FLOAT) / MAX(1, wins + losses) * 100, 1) as win_rate
        FROM users
-       WHERE season = 2 OR season IS NULL
+       WHERE season >= 2 OR season IS NULL
        ORDER BY rp DESC, wins DESC`;
 
   const stmt = db.prepare(query);
@@ -732,7 +732,7 @@ function getLeaderboard(limit = null) {
     .map(item => ({
       ...item,
       tier: getTierInfo(item.rp),
-      season: 2
+      season: 3
     }));
 }
 
@@ -779,7 +779,7 @@ function resetToSeason2() {
       u.wins = 0;
       u.losses = 0;
       u.draws = 0;
-      u.season = 2;
+      u.season = 3;
     });
     saveJsonStore();
   } else {
@@ -790,10 +790,10 @@ function resetToSeason2() {
           wins = 0,
           losses = 0,
           draws = 0,
-          season = 2
+          season = 3
     `);
   }
-  console.log('[DB] Reset all users to Season 2 baseline.');
+  console.log('[DB] Reset all users to Season 3 baseline.');
 }
 
 function recordWrongAnswer(userId, quizId, userAnswer, correctAnswer) {
@@ -870,7 +870,7 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
 
     // Only allow Season 2 points to update Season 2 users!
     // Never let old Season 1 2000 RP overwrite Season 2 baseline, and NEVER downgrade!
-    const isSeason2 = (userData.season === 2);
+    const isSeason2 = (userData.season === 3 || (userData.season === 3 || userData.season === 2));
 
     if (isSeason2) {
       if (typeof userData.rp === 'number' && userData.rp > existing.rp) {
@@ -901,11 +901,11 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
           jsonStore.users[idx].losses = newLosses;
           jsonStore.users[idx].draws = newDraws;
           jsonStore.users[idx].password = updatePass;
-          jsonStore.users[idx].season = 2;
+          jsonStore.users[idx].season = 3;
           saveJsonStore();
         }
       } else {
-        const stmt = db.prepare(`UPDATE users SET rp = ?, wins = ?, losses = ?, draws = ?, password = ?, season = 2 WHERE id = ?`);
+        const stmt = db.prepare(`UPDATE users SET rp = ?, wins = ?, losses = ?, draws = ?, password = ?, season = 3 WHERE id = ?`);
         stmt.run(newRp, newWins, newLosses, newDraws, updatePass, existing.id);
       }
     }
@@ -913,10 +913,10 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
     const id = userData.id || crypto.randomUUID();
     const password = userData.password || '1234';
     // If incoming user is from Season 1 without season=2, start Season 2 at 100 RP!
-    const rp = (userData.season === 2 && typeof userData.rp === 'number') ? userData.rp : 100;
-    const wins = (userData.season === 2 && typeof userData.wins === 'number') ? userData.wins : 0;
-    const losses = (userData.season === 2 && typeof userData.losses === 'number') ? userData.losses : 0;
-    const draws = (userData.season === 2 && typeof userData.draws === 'number') ? userData.draws : 0;
+    const rp = ((userData.season === 3 || userData.season === 2) && typeof userData.rp === 'number') ? userData.rp : 100;
+    const wins = ((userData.season === 3 || userData.season === 2) && typeof userData.wins === 'number') ? userData.wins : 0;
+    const losses = ((userData.season === 3 || userData.season === 2) && typeof userData.losses === 'number') ? userData.losses : 0;
+    const draws = ((userData.season === 3 || userData.season === 2) && typeof userData.draws === 'number') ? userData.draws : 0;
     const createdAt = userData.created_at || new Date().toISOString();
 
     if (useJsonFallback) {
@@ -928,7 +928,7 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
         wins,
         losses,
         draws,
-        season: 2,
+        season: 3,
         created_at: createdAt
       });
       saveJsonStore();
@@ -936,7 +936,7 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
       try {
         const stmt = db.prepare(`
           INSERT INTO users (id, nickname, password, rp, wins, losses, draws, season, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 2, datetime('now', 'localtime'))
+          VALUES (?, ?, ?, ?, ?, ?, ?, 3, datetime('now', 'localtime'))
         `);
         stmt.run(id, cleanNick, password, rp, wins, losses, draws);
       } catch (e) {
@@ -970,14 +970,14 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
               wins: peerWins,
               losses: peerLosses,
               draws: peerDraws,
-              season: 2,
+              season: 3,
               created_at: new Date().toISOString()
             });
           } else {
             try {
               const stmt = db.prepare(`
                 INSERT INTO users (id, nickname, password, rp, wins, losses, draws, season, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 2, datetime('now', 'localtime'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, 3, datetime('now', 'localtime'))
               `);
               stmt.run(lId, nick, 'saved_user', peerRp, peerWins, peerLosses, peerDraws);
             } catch (e) {}
@@ -997,13 +997,13 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
                 jsonStore.users[idx].wins = higherWins;
                 jsonStore.users[idx].losses = higherLosses;
                 jsonStore.users[idx].draws = higherDraws;
-                jsonStore.users[idx].season = 2;
+                jsonStore.users[idx].season = 3;
               }
             } else {
               try {
                 db.prepare(`
                   UPDATE users 
-                  SET rp = ?, wins = ?, losses = ?, draws = ?, season = 2 
+                  SET rp = ?, wins = ?, losses = ?, draws = ?, season = 3 
                   WHERE id = ?
                 `).run(higherRp, higherWins, higherLosses, higherDraws, found.id);
               } catch (e) {}
@@ -1037,6 +1037,7 @@ module.exports = {
   getLeaderboard,
   getSeason1HallOfFame,
   resetToSeason2,
+  resetToSeason3: resetToSeason2,
   recordWrongAnswer,
   saveWrongAnswer: recordWrongAnswer,
   getWrongAnswers,

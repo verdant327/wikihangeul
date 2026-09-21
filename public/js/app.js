@@ -1,9 +1,11 @@
 // -------------------------------------------------------------
-// Season 2 Storage Keys & Tier Definition
+// Season 3 Storage Keys & Tier Definition
 // -------------------------------------------------------------
 const STORAGE_KEYS = {
-  USER: 'waterpang_s2_user',
-  LEADERBOARD: 'waterpang_s2_leaderboard',
+  USER: 'waterpang_s3_user',
+  LEADERBOARD: 'waterpang_s3_leaderboard',
+  LEGACY_S2_USER: 'waterpang_s2_user',
+  LEGACY_S2_LEADERBOARD: 'waterpang_s2_leaderboard',
   LEGACY_USER: 'waterpang_user',
   LEGACY_LEADERBOARD: 'waterpang_leaderboard',
   HALL_OF_FAME: 'waterpang_s1_hall_of_fame',
@@ -179,30 +181,30 @@ function isProhibitedNickname(nickname, userId = null) {
 document.addEventListener('DOMContentLoaded', () => {
   battleFX = new BattleFX('battle-fx-canvas');
 
-  // Check Season 2 saved session or migrate seamlessly from Season 1
+  // Check Season 3 saved session or migrate seamlessly from Season 2 / Season 1
   let saved = localStorage.getItem(STORAGE_KEYS.USER);
   if (!saved) {
-    const legacySaved = localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
-    if (legacySaved) {
+    const prevSaved = localStorage.getItem(STORAGE_KEYS.LEGACY_S2_USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
+    if (prevSaved) {
       try {
-        const legacyParsed = JSON.parse(legacySaved);
-        if (legacyParsed && legacyParsed.nickname) {
-          console.log('[Season 2] Migrating account to Season 2:', legacyParsed.nickname);
-          const s2User = {
-            id: legacyParsed.id || ('user_' + Math.random().toString(36).substring(2, 9)),
-            nickname: legacyParsed.nickname,
-            password: legacyParsed.password || 'saved_user',
+        const prevParsed = JSON.parse(prevSaved);
+        if (prevParsed && prevParsed.nickname) {
+          console.log('[Season 3] Migrating account to Season 3:', prevParsed.nickname);
+          const s3User = {
+            id: prevParsed.id || ('user_' + Math.random().toString(36).substring(2, 9)),
+            nickname: prevParsed.nickname,
+            password: prevParsed.password || 'saved_user',
             rp: 100,
             wins: 0,
             losses: 0,
             draws: 0,
-            season: 2,
-            season1_rp: legacyParsed.rp || 100,
-            avatar: legacyParsed.avatar || '👦',
+            season: 3,
+            season1_rp: prevParsed.season1_rp || prevParsed.rp || 100,
+            avatar: prevParsed.avatar || '👦',
             tier: getTierInfo(100)
           };
-          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(s2User));
-          saved = JSON.stringify(s2User);
+          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(s3User));
+          saved = JSON.stringify(s3User);
         }
       } catch (e) {
         console.warn('Legacy migration error:', e);
@@ -1178,14 +1180,14 @@ function renderLeaderboardItems(list, container) {
   const modalTitle = document.getElementById('leaderboard-modal-title');
 
   if (!Array.isArray(list) || list.length === 0) {
-    if (modalTitle) modalTitle.innerText = '🏆 명예의 전당 (시즌2)';
+    if (modalTitle) modalTitle.innerText = '🏆 명예의 전당 (시즌3)';
     if (summaryBox) summaryBox.innerHTML = '';
     container.innerHTML = '<div style="text-align: center; color: #64748b; padding: 20px;">아직 기록된 학생이 없습니다. 첫 번째 챔피언이 되어보세요!</div>';
     return;
   }
 
   if (modalTitle) {
-    modalTitle.innerText = `🏆 명예의 전당 (시즌2) (전체 ${list.length}명)`;
+    modalTitle.innerText = `🏆 명예의 전당 (시즌3) (전체 ${list.length}명)`;
   }
 
   // Check currentUser rank
@@ -1219,7 +1221,7 @@ function renderLeaderboardItems(list, container) {
         <div class="my-rank-banner guest">
           <div class="my-rank-left">
             <div class="my-rank-label">⭐ ${currentUser.nickname}님의 순위</div>
-            <div class="my-rank-pos">시즌 2 등록됨 <span class="my-rank-total">(전체 ${list.length}명)</span></div>
+            <div class="my-rank-pos">시즌 3 등록됨 <span class="my-rank-total">(전체 ${list.length}명)</span></div>
           </div>
           <div class="my-rank-right">
             <div style="font-size: 12px; color: #64748b;">게임을 플레이하여 RP를 올려보세요! 🎮</div>
@@ -1275,7 +1277,7 @@ function renderLeaderboardItems(list, container) {
 async function openLeaderboard() {
   const container = document.getElementById('leaderboard-container');
   const modalTitle = document.getElementById('leaderboard-modal-title');
-  if (modalTitle) modalTitle.innerText = '🏆 명예의 전당 (시즌2)';
+  if (modalTitle) modalTitle.innerText = '🏆 명예의 전당 (시즌3)';
 
   // Show cached leaderboard immediately
   try {
