@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>워터팡! 초등 맞춤법 퀴즈 배틀</title>
+  <link rel="stylesheet" href="/css/style.css?v=2.0">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
+</head>
+<body>
+  <div id="app">
+    <!-- Game Header -->
+    <header class="game-header">
+      <div class="logo-title">
+        <span>💧</span>
+        <span>워터팡! 맞춤법 배틀 <span style="background: #f59e0b; color: #451a03; font-size: 13px; padding: 2px 8px; border-radius: 12px; margin-left: 4px; font-weight: 900; vertical-align: middle;">시즌 2</span></span>
+      </div>
+      <div class="user-quick-bar" id="header-user-bar" style="display: none;">
+        <span class="tier-badge" id="header-tier-badge">💧 물방울 (100 RP)</span>
+        <span id="header-nickname" style="font-size: 16px; font-weight: bold;"></span>
+        <button class="btn-icon" id="btn-sound-toggle" title="소리 켜기/끄기">🔊</button>
+        <button class="btn-icon" id="btn-logout" title="로그아웃">🚪</button>
+      </div>
+    </header>
+
+    <!-- 1. Auth View (Login / Register / Quick Guest) -->
+    <section class="view-panel active" id="view-auth">
+      <div class="auth-container">
+        <div class="auth-logo">🎈💦</div>
+        <div class="auth-card">
+          <h2 style="font-size: 26px; color: #0284c7; margin-bottom: 8px;">신나는 맞춤법 퀴즈 대결!</h2>
+          <p style="font-size: 14px; color: #64748b; margin-bottom: 20px;">
+            친구들과 1대 1로 물풍선을 던지며 맞춤법 왕이 되어보세요!
+          </p>
+
+          <!-- Auth Mode Tabs -->
+          <div class="auth-tabs">
+            <button type="button" class="auth-tab active" id="tab-login">기존 아이디 로그인</button>
+            <button type="button" class="auth-tab" id="tab-register">새 계정 만들기</button>
+          </div>
+
+          <form id="form-auth">
+            <div class="form-group">
+              <label class="form-label" for="auth-nickname">내 닉네임 (아이디)</label>
+              <input type="text" id="auth-nickname" class="form-input" placeholder="예: 번개람쥐 (2~10자)" maxlength="12" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="auth-password">간편 비밀번호</label>
+              <input type="password" id="auth-password" class="form-input" placeholder="비밀번호 (2자 이상)" required>
+            </div>
+
+            <button type="submit" class="btn-primary" id="btn-submit-auth">로그인하기</button>
+            <button type="button" class="btn-sub" id="btn-forgot-pw" style="display: block; margin: 12px auto 0; font-size: 13px; color: #64748b; background: none; border: none; cursor: pointer; text-decoration: underline;">비밀번호를 잊으셨나요?</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Lobby View -->
+    <section class="view-panel" id="view-lobby">
+      <div class="lobby-grid">
+        <!-- Profile Column -->
+        <div class="profile-card">
+          <div class="profile-avatar-large" id="lobby-avatar">👦</div>
+          <h3 class="profile-name" id="lobby-nickname">학생</h3>
+          <div class="tier-badge" id="lobby-tier-badge" style="margin-bottom: 8px;">💧 물방울 (100 RP)</div>
+          
+          <div class="stats-panel">
+            <div class="stat-box">
+              <div class="stat-value" id="stat-wins">0</div>
+              <div class="stat-label">승리</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-value" id="stat-losses">0</div>
+              <div class="stat-label">패배</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-value" id="stat-winrate">0%</div>
+              <div class="stat-label">승률</div>
+            </div>
+          </div>
+
+          <div style="font-size: 13px; color: #64748b; width: 100%; text-align: left; margin-top: 4px;">
+            다음 티어까지: <span id="tier-next-rp" style="font-weight: bold; color: #0284c7;">100 RP</span> 남음!
+          </div>
+        </div>
+
+        <!-- Main Action Column -->
+        <div class="lobby-main">
+          <div class="hero-banner">
+            <h2>실시간 1대 1 물풍선 배틀!</h2>
+            <p>
+              문제를 먼저 맞혀 물풍선을 날려보세요! 💥<br>
+              10문제를 풀고 승리하면 티어가 올라갑니다.
+            </p>
+            <div class="hero-water-balloon">🎈</div>
+          </div>
+
+          <div class="action-cards">
+            <button class="action-card-btn" id="btn-open-leaderboard">
+              <div class="action-icon">🏆</div>
+              <div class="action-text">
+                <div class="action-title">명예의 전당 (시즌2)</div>
+                <div class="action-desc">전체 학생 티어 순위 보기</div>
+              </div>
+            </button>
+
+            <button class="action-card-btn" id="btn-open-wrongnotes">
+              <div class="action-icon">📝</div>
+              <div class="action-text">
+                <div class="action-title">나의 오답노트</div>
+                <div class="action-desc">틀렸던 맞춤법 복습하기</div>
+              </div>
+            </button>
+          </div>
+
+          <button class="btn-primary btn-battle-start" id="btn-start-matching">
+            🚀 1대1 대결 시작! (랜덤 매칭)
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Matchmaking Queue View -->
+    <section class="view-panel" id="view-matchmaking">
+      <div class="matchmaking-container">
+        <div class="radar-wrapper">
+          <div class="radar-pulse"></div>
+          <div class="radar-pulse"></div>
+          <div class="radar-pulse"></div>
+          <div class="radar-icon">🎯</div>
+        </div>
+        <h2 class="queue-status-text">대결 상대를 찾는 중...</h2>
+        <p class="queue-subtext">
+          매칭을 기다리는 친구가 없으면 <strong>3초 후 AI 봇</strong>과 대결이 시작됩니다!
+        </p>
+        <button class="btn-primary btn-accent" id="btn-cancel-matching" style="max-width: 240px;">
+          매칭 취소
+        </button>
+      </div>
+    </section>
+
+    <!-- 4. Battle Arena View -->
+    <section class="view-panel" id="view-battle">
+      <div class="battle-container" id="game-arena">
+        <!-- Canvas for water balloons & particle explosions -->
+        <canvas id="battle-fx-canvas"></canvas>
+
+        <!-- Battle Header -->
+        <div class="battle-top-bar">
+          <div class="round-pill" id="battle-round-indicator">라운드 1 / 10</div>
+          <div class="battle-timer-box">
+            <span>⏱️</span>
+            <span id="battle-timer-num">10</span>s
+            <div class="timer-bar-bg">
+              <div class="timer-bar-fill" id="battle-timer-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Versus Arena Section -->
+        <div class="arena-versus">
+          <!-- Player 1 (Me) -->
+          <div class="fighter-card" id="fighter-p1">
+            <div class="fighter-avatar" id="avatar-p1">👦
+              <div class="water-drips">💦</div>
+            </div>
+            <div class="fighter-name" id="name-p1">나</div>
+            <div class="hp-gauge-wrapper">
+              <div class="hp-text">
+                <span>체력</span>
+                <span id="hp-num-p1">100 / 100</span>
+              </div>
+              <div class="hp-bar-bg">
+                <div class="hp-bar-fill" id="hp-bar-p1" style="width: 100%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="vs-badge">VS</div>
+
+          <!-- Player 2 (Opponent) -->
+          <div class="fighter-card" id="fighter-p2">
+            <div class="fighter-avatar" id="avatar-p2">🤖
+              <div class="water-drips">💦</div>
+            </div>
+            <div class="fighter-name" id="name-p2">상대방</div>
+            <div class="hp-gauge-wrapper">
+              <div class="hp-text">
+                <span>체력</span>
+                <span id="hp-num-p2">100 / 100</span>
+              </div>
+              <div class="hp-bar-bg">
+                <div class="hp-bar-fill" id="hp-bar-p2" style="width: 100%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quiz Area -->
+        <div class="quiz-card">
+          <div class="quiz-question" id="quiz-question-text">
+            문제를 불러오는 중입니다...
+          </div>
+
+          <div class="quiz-options-grid" id="quiz-options-container">
+            <!-- Buttons injected by app.js -->
+          </div>
+        </div>
+
+        <!-- Live Battle Action Banner -->
+        <div class="battle-banner" id="battle-live-banner">
+          문제를 먼저 맞히는 사람이 상대에게 물풍선을 던집니다!
+        </div>
+
+        <div class="explanation-box" id="round-explanation-box" style="display: none;">
+          <!-- Educational spelling explanation -->
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Match Over View -->
+    <section class="view-panel" id="view-match-over">
+      <div class="match-over-container">
+        <div class="result-crown" id="result-emoji">👑</div>
+        <h2 class="result-title win" id="result-title">대승리!</h2>
+        
+        <div class="rp-badge-change plus" id="result-rp-badge">
+          +25 RP 획득!
+        </div>
+
+        <div style="width: 100%; max-width: 600px; text-align: left; margin-bottom: 8px; font-weight: bold; color: #0284c7;">
+          📖 이번 대결 오답/정답 퀴즈 복습
+        </div>
+        <div class="match-history-recap" id="match-recap-list">
+          <!-- Recap rounds injected here -->
+        </div>
+
+        <div style="display: flex; gap: 16px; width: 100%; max-width: 440px;">
+          <button class="btn-primary" id="btn-return-lobby">로비로 이동</button>
+          <button class="btn-primary btn-accent" id="btn-rematch">다시 대결하기</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Modal: Leaderboard -->
+    <div class="modal-backdrop" id="modal-leaderboard">
+      <div class="modal-window">
+        <div class="modal-header">
+          <h3 id="leaderboard-modal-title">🏆 명예의 전당 (시즌2)</h3>
+          <button class="btn-close" id="btn-close-leaderboard">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="leaderboard-my-summary"></div>
+          <div class="leaderboard-list" id="leaderboard-container">
+            <!-- Leaderboard rows -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Wrong Answer Note -->
+    <div class="modal-backdrop" id="modal-wrongnotes">
+      <div class="modal-window">
+        <div class="modal-header">
+          <h3>📝 나의 맞춤법 오답노트</h3>
+          <button class="btn-close" id="btn-close-wrongnotes">✕</button>
+        </div>
+        <div class="modal-body" id="wrongnotes-container">
+          <!-- Wrong answer cards -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast message -->
+    <div class="toast-msg" id="toast-notification"></div>
+
+    <!-- Game Footer -->
+    <footer class="game-footer">
+      <span>💧 워터팡! 초등 맞춤법 배틀</span>
+      <span class="footer-dot">·</span>
+      <span class="footer-author">made by 하하하하하쌤</span>
+    </footer>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/js/audio.js?v=2.0"></script>
+  <script src="/js/particles.js?v=2.0"></script>
+  <script src="/js/app.js?v=2.0"></script>
+</body>
+</html>

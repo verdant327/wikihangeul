@@ -15,6 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const url = require('node:url');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 
 // =============================================================
 // Embedded Database Engine (SQLite + JSON Fallback, Zero Stale)
@@ -1021,7 +1022,7 @@ return {
 
 })();
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // Fallback 120 Curated Korean Spelling Quizzes
@@ -5478,6 +5479,44 @@ function createMatchRoom(player1, player2, isBotMatch) {
   return room;
 }
 
+// Bandwidth Optimizer Helper: Gzip compression + ETag + 304 Not Modified
+function sendOptimized(req, res, statusCode, headers, content) {
+  const buf = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
+  const etag = '"' + crypto.createHash('md5').update(buf).digest('hex') + '"';
+
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { 'ETag': etag });
+    res.end();
+    return;
+  }
+
+  const outHeaders = {
+    ...headers,
+    'ETag': etag,
+    'Vary': 'Accept-Encoding'
+  };
+
+  const accept = req.headers['accept-encoding'] || '';
+  if (accept.includes('gzip') && buf.length > 256) {
+    zlib.gzip(buf, (err, gzipped) => {
+      if (err) {
+        outHeaders['Content-Length'] = buf.length;
+        res.writeHead(statusCode, outHeaders);
+        res.end(buf);
+      } else {
+        outHeaders['Content-Encoding'] = 'gzip';
+        outHeaders['Content-Length'] = gzipped.length;
+        res.writeHead(statusCode, outHeaders);
+        res.end(gzipped);
+      }
+    });
+  } else {
+    outHeaders['Content-Length'] = buf.length;
+    res.writeHead(statusCode, outHeaders);
+    res.end(buf);
+  }
+}
+
 // -------------------------------------------------------------
 // HTTP Server & Routing
 // -------------------------------------------------------------
@@ -5781,16 +5820,20 @@ const server = http.createServer((req, res) => {
       };
     });
 
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, user, matches, wrongAnswers }));
+    sendOptimized(req, res, 200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'private, no-cache'
+    }, JSON.stringify({ ok: true, user, matches, wrongAnswers }));
     return;
   }
 
   if (pathname === '/api/leaderboard' && req.method === 'GET') {
-    // Return all students without limit so full school rankings are visible
+    // Return all students with Gzip compression and short cache (15s)
     const list = db.getLeaderboard();
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, leaderboard: list }));
+    sendOptimized(req, res, 200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'public, max-age=15, stale-while-revalidate=30'
+    }, JSON.stringify({ ok: true, leaderboard: list }));
     return;
   }
 
@@ -5904,39 +5947,20 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 4. Bulletproof Static File Serving (Prioritizes embedded assets for zero-stale deployment)
+  // 4. Bulletproof Static File Serving (Disk first, Embedded fallback with Gzip & ETag caching)
   const normPath = pathname === '/' ? '/index.html' : pathname;
   const ext = path.extname(normPath).toLowerCase();
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
-  if (EMBEDDED_FILES[normPath]) {
-    res.writeHead(200, {
-      'Content-Type': EMBEDDED_FILES[normPath].type,
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0'
-    });
-    res.end(EMBEDDED_FILES[normPath].content);
-    return;
-  }
-
-  if (ext === '' || ext === '.html') {
-    if (EMBEDDED_FILES['/index.html']) {
-      res.writeHead(200, {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      });
-      res.end(EMBEDDED_FILES['/index.html'].content);
-      return;
-    }
-  }
+  const isHtml = (ext === '' || ext === '.html');
+  const cacheHeader = isHtml
+    ? 'no-cache'
+    : 'public, max-age=86400, stale-while-revalidate=604800';
 
   const cleanRelative = normPath.replace(/^\//, '');
   const candidateDiskPaths = [
     path.join(PUBLIC_DIR, cleanRelative),
     path.join(__dirname, cleanRelative),
+    path.join(__dirname, 'public', cleanRelative),
     path.join(__dirname, 'spelling-quiz-battle', 'public', cleanRelative),
     path.join(__dirname, 'spelling-quiz-battle', cleanRelative)
   ];
@@ -5955,13 +5979,29 @@ const server = http.createServer((req, res) => {
         res.writeHead(500);
         res.end('Server Error');
       } else {
-        res.writeHead(200, {
+        sendOptimized(req, res, 200, {
           'Content-Type': contentType,
-          'Cache-Control': 'no-cache, no-store, must-revalidate'
-        });
-        res.end(content);
+          'Cache-Control': cacheHeader
+        }, content);
       }
     });
+    return;
+  }
+
+  // Embedded assets fallback
+  if (EMBEDDED_FILES[normPath]) {
+    sendOptimized(req, res, 200, {
+      'Content-Type': EMBEDDED_FILES[normPath].type,
+      'Cache-Control': cacheHeader
+    }, EMBEDDED_FILES[normPath].content);
+    return;
+  }
+
+  if (isHtml && EMBEDDED_FILES['/index.html']) {
+    sendOptimized(req, res, 200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache'
+    }, EMBEDDED_FILES['/index.html'].content);
     return;
   }
 
