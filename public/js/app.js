@@ -26,20 +26,61 @@ function getTierInfo(rp) {
   }
 }
 
+function sortLeaderboardList(list) {
+  if (!Array.isArray(list)) return [];
+  return list.sort((a, b) => {
+    // 1. RP descending
+    const rpA = Number(a.rp) || 100;
+    const rpB = Number(b.rp) || 100;
+    if (rpB !== rpA) return rpB - rpA;
+
+    // 2. Active player priority (played at least 1 match)
+    const gamesA = (Number(a.wins) || 0) + (Number(a.losses) || 0) + (Number(a.draws) || 0);
+    const gamesB = (Number(b.wins) || 0) + (Number(b.losses) || 0) + (Number(b.draws) || 0);
+    const activeA = gamesA > 0 ? 1 : 0;
+    const activeB = gamesB > 0 ? 1 : 0;
+    if (activeB !== activeA) return activeB - activeA;
+
+    // 3. Wins descending
+    const winsA = Number(a.wins) || 0;
+    const winsB = Number(b.wins) || 0;
+    if (winsB !== winsA) return winsB - winsA;
+
+    // 4. Win rate descending
+    const rateA = Number(a.win_rate) || 0;
+    const rateB = Number(b.win_rate) || 0;
+    if (rateB !== rateA) return rateB - rateA;
+
+    // 5. Total games played descending
+    if (gamesB !== gamesA) return gamesB - gamesA;
+
+    // 6. Absolute deterministic tie-breaker: Korean / Alphabetical by nickname
+    const nameA = String(a.nickname || '');
+    const nameB = String(b.nickname || '');
+    return nameA.localeCompare(nameB, 'ko');
+  });
+}
+
 let lastLeaderboardFetch = 0;
 async function refreshLeaderboardCache(force = false) {
   const now = Date.now();
-  if (!force && now - lastLeaderboardFetch < 60000) return;
+  if (!force && now - lastLeaderboardFetch < 5000) return;
   lastLeaderboardFetch = now;
   try {
-    const res = await fetch('/api/leaderboard');
+    const res = await fetch(`/api/leaderboard?_t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+    });
     if (res.ok) {
       const data = await res.json();
       if (data.ok && Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.LEADERBOARD, JSON.stringify(data.leaderboard));
+        const sorted = sortLeaderboardList(data.leaderboard);
+        localStorage.setItem(STORAGE_KEYS.LEADERBOARD, JSON.stringify(sorted));
+        return sorted;
       }
     }
   } catch (e) {}
+  return null;
 }
 
 // Main Game Application Logic
@@ -1167,7 +1208,7 @@ function onMatchOver(data) {
           } else {
             cachedLb.push(updatedItem);
           }
-          cachedLb.sort((a, b) => (b.rp !== a.rp ? b.rp - a.rp : b.wins - a.wins));
+          sortLeaderboardList(cachedLb);
           localStorage.setItem(STORAGE_KEYS.LEADERBOARD, JSON.stringify(cachedLb));
         }
 
@@ -1286,9 +1327,38 @@ function renderLeaderboardItems(list, container) {
   const summaryBox = document.getElementById('leaderboard-my-summary');
   const modalTitle = document.getElementById('leaderboard-modal-title');
 
+  const isTeacher = currentUser && (
+    currentUser.nickname === '하하하하하쌤' ||
+    currentUser.role === 'teacher' ||
+    currentUser.isTeacher === true ||
+    (currentUser.nickname && currentUser.nickname.includes('하하하하하쌤'))
+  );
+
+  const toolbarHtml = `
+    <div class="leaderboard-toolbar" style="display: flex; gap: 8px; justify-content: space-between; align-items: center; margin-top: 8px; margin-bottom: 8px; flex-wrap: wrap; background: #f1f5f9; padding: 6px 12px; border-radius: 8px;">
+      <div style="display: flex; gap: 6px; align-items: center;">
+        <button type="button" id="btn-refresh-leaderboard" class="btn-primary" style="padding: 5px 10px; font-size: 12px; width: auto; background: #0284c7; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" onclick="openLeaderboard(true)">
+          🔄 실시간 새로고침
+        </button>
+        <span style="font-size: 11px; color: #64748b;">📱 모바일/PC 동일 순위</span>
+      </div>
+      ${isTeacher ? `
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button type="button" style="padding: 5px 10px; font-size: 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;" onclick="adminExportLeaderboard()" title="현재 랭킹 전체를 JSON 파일로 다운로드합니다">
+            💾 랭킹 백업
+          </button>
+          <label style="padding: 5px 10px; font-size: 12px; background: #8b5cf6; color: white; border-radius: 6px; cursor: pointer; font-weight: bold; margin: 0; display: inline-flex; align-items: center;" title="저장해둔 JSON 백업 파일로 랭킹을 복원합니다">
+            📥 랭킹 복원
+            <input type="file" accept=".json" style="display: none;" onchange="if(this.files[0]) adminImportLeaderboard(this.files[0]); this.value='';">
+          </label>
+        </div>
+      ` : ''}
+    </div>
+  `;
+
   if (!Array.isArray(list) || list.length === 0) {
     if (modalTitle) modalTitle.innerText = '🏆 명예의 전당 (시즌3)';
-    if (summaryBox) summaryBox.innerHTML = '';
+    if (summaryBox) summaryBox.innerHTML = toolbarHtml;
     container.innerHTML = '<div style="text-align: center; color: #64748b; padding: 20px;">아직 기록된 학생이 없습니다. 첫 번째 챔피언이 되어보세요!</div>';
     return;
   }
@@ -1303,6 +1373,7 @@ function renderLeaderboardItems(list, container) {
     : -1;
 
   if (summaryBox) {
+    let bannerHtml = '';
     if (myRankIdx !== -1) {
       const myUser = list[myRankIdx];
       const rankNum = myRankIdx + 1;
@@ -1310,7 +1381,7 @@ function renderLeaderboardItems(list, container) {
       const badge = (myUser.tier && myUser.tier.badge) || '💧';
       const tierName = (myUser.tier && myUser.tier.name) || '물방울';
 
-      summaryBox.innerHTML = `
+      bannerHtml = `
         <div class="my-rank-banner" onclick="scrollToMyRank()" title="클릭하면 내 순위 위치로 이동합니다">
           <div class="my-rank-left">
             <div class="my-rank-label">⭐ 내 순위 확인 (클릭하여 위치 이동)</div>
@@ -1324,7 +1395,7 @@ function renderLeaderboardItems(list, container) {
         </div>
       `;
     } else if (currentUser) {
-      summaryBox.innerHTML = `
+      bannerHtml = `
         <div class="my-rank-banner guest">
           <div class="my-rank-left">
             <div class="my-rank-label">⭐ ${currentUser.nickname}님의 순위</div>
@@ -1335,9 +1406,8 @@ function renderLeaderboardItems(list, container) {
           </div>
         </div>
       `;
-    } else {
-      summaryBox.innerHTML = '';
     }
+    summaryBox.innerHTML = bannerHtml + toolbarHtml;
   }
 
   container.innerHTML = '';
@@ -1381,10 +1451,15 @@ function renderLeaderboardItems(list, container) {
   });
 }
 
-async function openLeaderboard() {
+async function openLeaderboard(forceRefresh = false) {
   const container = document.getElementById('leaderboard-container');
   const modalTitle = document.getElementById('leaderboard-modal-title');
   if (modalTitle) modalTitle.innerText = '🏆 명예의 전당 (시즌3)';
+
+  // Proactively sync currentUser if we have local score
+  if (currentUser) {
+    try { syncUserWithServer(currentUser); } catch (e) {}
+  }
 
   // Show cached leaderboard immediately
   try {
@@ -1392,7 +1467,7 @@ async function openLeaderboard() {
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        renderLeaderboardItems(parsed, container);
+        renderLeaderboardItems(sortLeaderboardList(parsed), container);
       }
     }
   } catch (e) {}
@@ -1408,11 +1483,13 @@ async function openLeaderboard() {
   }, 200);
 
   try {
-    const res = await fetch('/api/leaderboard');
-    if (res.status === 304) {
-      lastLeaderboardFetch = Date.now();
-      return;
-    }
+    const res = await fetch(`/api/leaderboard?_t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+      }
+    });
     const data = await res.json();
     if (data.ok && data.leaderboard) {
       if (data.leaderboard.length > 0) {
@@ -1424,13 +1501,14 @@ async function openLeaderboard() {
             if (typeof currentUser.rp === 'number' && currentUser.rp > myEntry.rp) {
               myEntry.rp = currentUser.rp;
               myEntry.wins = Math.max(myEntry.wins || 0, currentUser.wins || 0);
+              myEntry.losses = Math.max(myEntry.losses || 0, currentUser.losses || 0);
               myEntry.tier = getTierInfo(myEntry.rp);
             }
           }
-          list.sort((a, b) => (b.rp !== a.rp ? b.rp - a.rp : b.wins - a.wins));
         }
-        localStorage.setItem(STORAGE_KEYS.LEADERBOARD, JSON.stringify(list));
-        renderLeaderboardItems(list, container);
+        const sorted = sortLeaderboardList(list);
+        localStorage.setItem(STORAGE_KEYS.LEADERBOARD, JSON.stringify(sorted));
+        renderLeaderboardItems(sorted, container);
         setTimeout(() => {
           const myRow = document.getElementById('my-leaderboard-row');
           if (myRow) myRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1441,6 +1519,62 @@ async function openLeaderboard() {
     }
   } catch (e) {
     console.warn('Leaderboard fetch error, using cache:', e);
+  }
+}
+
+async function adminExportLeaderboard() {
+  try {
+    const res = await fetch(`/api/admin/leaderboard-export?_t=${Date.now()}`);
+    if (!res.ok) throw new Error('서버 응답 오류');
+    const data = await res.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `waterpang_s3_leaderboard_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    if (typeof showToast === 'function') {
+      showToast('💾 랭킹 백업 파일이 다운로드되었습니다!');
+    } else {
+      alert('💾 랭킹 백업 파일이 다운로드되었습니다!');
+    }
+  } catch (e) {
+    alert('랭킹 백업 중 오류: ' + e.message);
+  }
+}
+
+async function adminImportLeaderboard(file) {
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const leaderboard = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.leaderboard) ? parsed.leaderboard : null);
+    if (!leaderboard) {
+      alert('올바른 백업 JSON 형식이 아닙니다.');
+      return;
+    }
+    if (!confirm(`총 ${leaderboard.length}명의 랭킹 데이터를 복원하시겠습니까?\n기존 점수보다 높은 점수만 안전하게 병합/복원됩니다.`)) {
+      return;
+    }
+    const res = await fetch('/api/admin/leaderboard-import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leaderboard })
+    });
+    const result = await res.json();
+    if (result.ok) {
+      if (typeof showToast === 'function') {
+        showToast(`🎉 ${result.count || leaderboard.length}명의 랭킹이 성공적으로 복원되었습니다!`);
+      } else {
+        alert(`🎉 ${result.count || leaderboard.length}명의 랭킹이 성공적으로 복원되었습니다!`);
+      }
+      await openLeaderboard(true);
+    } else {
+      alert('복원 실패: ' + (result.error || '알 수 없는 오류'));
+    }
+  } catch (e) {
+    alert('파일 복원 중 오류: ' + e.message);
   }
 }
 

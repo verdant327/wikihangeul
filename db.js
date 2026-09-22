@@ -690,8 +690,24 @@ function getLeaderboard(limit = null) {
   if (useJsonFallback) {
     const validUsers = (jsonStore.users || []).filter(u => u && u.nickname && !isProhibitedNickname(u.nickname, u.id).prohibited && (u.season === 3 || u.season === 2 || !u.season));
     const sorted = [...validUsers].sort((a, b) => {
+      // 1. Higher RP first
       if (b.rp !== a.rp) return b.rp - a.rp;
-      return b.wins - a.wins;
+      // 2. Active players who have played matches (wins + losses + draws > 0) come before unplayed accounts!
+      const aPlayed = ((a.wins || 0) + (a.losses || 0) + (a.draws || 0)) > 0 ? 1 : 0;
+      const bPlayed = ((b.wins || 0) + (b.losses || 0) + (b.draws || 0)) > 0 ? 1 : 0;
+      if (bPlayed !== aPlayed) return bPlayed - aPlayed;
+      // 3. More wins first
+      if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
+      // 4. Higher win rate first
+      const aTotal = (a.wins || 0) + (a.losses || 0);
+      const bTotal = (b.wins || 0) + (b.losses || 0);
+      const aRate = aTotal > 0 ? (a.wins || 0) / aTotal : 0;
+      const bRate = bTotal > 0 ? (b.wins || 0) / bTotal : 0;
+      if (bRate !== aRate) return bRate - aRate;
+      // 5. Total matches played (more active first)
+      if (bTotal !== aTotal) return bTotal - aTotal;
+      // 6. Absolute deterministic tie breaker: Korean alphabetical order by nickname!
+      return (a.nickname || '').localeCompare(b.nickname || '', 'ko');
     });
     const list = (limit && limit > 0) ? sorted.slice(0, limit) : sorted;
 
@@ -717,13 +733,25 @@ function getLeaderboard(limit = null) {
               ROUND(CAST(wins AS FLOAT) / MAX(1, wins + losses) * 100, 1) as win_rate
        FROM users
        WHERE season >= 2 OR season IS NULL
-       ORDER BY rp DESC, wins DESC
+       ORDER BY 
+         rp DESC,
+         CASE WHEN (wins + losses + draws) > 0 THEN 1 ELSE 0 END DESC,
+         wins DESC,
+         ROUND(CAST(wins AS FLOAT) / MAX(1, wins + losses) * 100, 1) DESC,
+         (wins + losses) DESC,
+         nickname COLLATE NOCASE ASC
        LIMIT ?`
     : `SELECT id, nickname, rp, wins, losses, draws,
               ROUND(CAST(wins AS FLOAT) / MAX(1, wins + losses) * 100, 1) as win_rate
        FROM users
        WHERE season >= 2 OR season IS NULL
-       ORDER BY rp DESC, wins DESC`;
+       ORDER BY 
+         rp DESC,
+         CASE WHEN (wins + losses + draws) > 0 THEN 1 ELSE 0 END DESC,
+         wins DESC,
+         ROUND(CAST(wins AS FLOAT) / MAX(1, wins + losses) * 100, 1) DESC,
+         (wins + losses) DESC,
+         nickname COLLATE NOCASE ASC`;
 
   const stmt = db.prepare(query);
   const list = (limit && limit > 0) ? stmt.all(limit) : stmt.all();
