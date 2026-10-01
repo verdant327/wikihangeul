@@ -399,18 +399,18 @@ function initSeason2Data() {
       }
     }
 
-    // 2. Pre-seed users for Season 2 so new devices instantly find their account
+    // 2. Pre-seed users for Season 4 so new devices instantly find their account
     if (useJsonFallback) {
       if (!jsonStore.users) jsonStore.users = [];
-      // Transition existing users to Season 2
+      // Transition existing users to Season 4
       jsonStore.users.forEach(u => {
-        if (u.season !== 3) {
-          u.season1_rp = u.rp || 100;
+        if (u.season !== 4) {
+          u.season3_rp = u.rp || 100;
           u.rp = 100;
           u.wins = 0;
           u.losses = 0;
           u.draws = 0;
-          u.season = 3;
+          u.season = 4;
         }
       });
       // Pre-seed any missing users
@@ -425,7 +425,8 @@ function initSeason2Data() {
               wins: 0,
               losses: 0,
               draws: 0,
-              season: 3,
+              season: 4,
+              season3_rp: 100,
               season1_rp: u.season1_rp || 100,
               season1_rank: u.season1_rank || 0,
               created_at: new Date().toISOString()
@@ -963,7 +964,7 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
           saveJsonStore();
         }
       } else {
-        const stmt = db.prepare(`UPDATE users SET rp = ?, wins = ?, losses = ?, draws = ?, password = ?, season = 3 WHERE id = ?`);
+        const stmt = db.prepare(`UPDATE users SET rp = ?, wins = ?, losses = ?, draws = ?, password = ?, season = 4 WHERE id = ?`);
         stmt.run(newRp, newWins, newLosses, newDraws, updatePass, existing.id);
       }
     }

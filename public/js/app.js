@@ -224,9 +224,32 @@ function isProhibitedNickname(nickname, userId = null) {
 document.addEventListener('DOMContentLoaded', () => {
   battleFX = new BattleFX('battle-fx-canvas');
 
+  // Clear any stale legacy leaderboards so they don't flash old Season 3 scores
+  try {
+    localStorage.removeItem(STORAGE_KEYS.LEGACY_S3_LEADERBOARD);
+    localStorage.removeItem(STORAGE_KEYS.LEGACY_S2_LEADERBOARD);
+    localStorage.removeItem(STORAGE_KEYS.LEGACY_LEADERBOARD);
+  } catch (e) {}
+
   // Check Season 4 saved session or migrate cleanly from Season 3 / Season 2
   let saved = localStorage.getItem(STORAGE_KEYS.USER);
-  if (!saved) {
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed && parsed.nickname) {
+        // Enforce Season 4 baseline reset to 100 RP if not yet migrated to Season 4
+        if (parsed.season !== 4) {
+          console.log('[Season 4] Resetting saved account to Season 4 (RP: 100):', parsed.nickname);
+          parsed.season3_rp = parsed.rp || 100;
+          parsed.rp = 100;
+          parsed.season = 4;
+          parsed.tier = getTierInfo(100);
+          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(parsed));
+          saved = JSON.stringify(parsed);
+        }
+      }
+    } catch (e) {}
+  } else {
     const prevSaved = localStorage.getItem(STORAGE_KEYS.LEGACY_S3_USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_S2_USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
     if (prevSaved) {
       try {
@@ -433,14 +456,20 @@ function updateUserData(user) {
 }
 
 function loginSuccess(user) {
-  // Anti-downgrade shield on login: If local currentUser has higher RP, preserve it!
-  if (currentUser && currentUser.nickname === user.nickname) {
-    if (typeof currentUser.rp === 'number' && currentUser.rp > (user.rp || 0)) {
-      console.log(`[Auth] Preserving higher local RP on login: ${currentUser.rp} vs server ${user.rp}`);
-      user.rp = currentUser.rp;
-      user.wins = Math.max(user.wins || 0, currentUser.wins || 0);
-      user.losses = Math.max(user.losses || 0, currentUser.losses || 0);
-      user.draws = Math.max(user.draws || 0, currentUser.draws || 0);
+  // Anti-downgrade shield on login: If local currentUser has higher RP, preserve it ONLY within Season 4!
+  if (user && user.season === 4) {
+    if (currentUser && currentUser.nickname === user.nickname && currentUser.season === 4) {
+      if (typeof currentUser.rp === 'number' && currentUser.rp > (user.rp || 0)) {
+        console.log(`[Auth] Preserving higher local Season 4 RP on login: ${currentUser.rp} vs server ${user.rp}`);
+        user.rp = currentUser.rp;
+        user.wins = Math.max(user.wins || 0, currentUser.wins || 0);
+        user.losses = Math.max(user.losses || 0, currentUser.losses || 0);
+        user.draws = Math.max(user.draws || 0, currentUser.draws || 0);
+        user.tier = getTierInfo(user.rp);
+      }
+    } else {
+      // Transitioning to Season 4: accept server's Season 4 RP
+      if (typeof user.rp !== 'number') user.rp = 100;
       user.tier = getTierInfo(user.rp);
     }
   }
@@ -473,6 +502,11 @@ function logout() {
 async function syncUserWithServer(userToSync) {
   if (!userToSync || !userToSync.nickname) return;
   try {
+    if (!userToSync.season || userToSync.season < 4) {
+      userToSync.season = 4;
+      userToSync.rp = 100;
+      userToSync.tier = getTierInfo(100);
+    }
     let leaderboardSnapshot = [];
     try {
       const cached = localStorage.getItem(STORAGE_KEYS.LEADERBOARD);
@@ -515,8 +549,8 @@ async function fetchProfile(userId) {
       if (data.user.nickname === '학생' && currentUser && currentUser.nickname && currentUser.nickname !== '학생') {
         data.user.nickname = currentUser.nickname;
       }
-      // Anti-downgrade shield: Protect local verified RP from lower server value
-      if (currentUser && typeof currentUser.rp === 'number') {
+      // Anti-downgrade shield: Protect local verified RP from lower server value ONLY within Season 4!
+      if (currentUser && typeof currentUser.rp === 'number' && currentUser.season === 4 && data.user.season === 4) {
         if (data.user.rp < currentUser.rp) {
           console.warn(`[Profile] Anti-downgrade shield: Server RP (${data.user.rp}) is lower than local verified RP (${currentUser.rp}). Syncing higher RP to server.`);
           await syncUserWithServer(currentUser);
@@ -1534,7 +1568,7 @@ async function openLeaderboard(forceRefresh = false) {
         if (currentUser && Array.isArray(list)) {
           const myEntry = list.find(u => (u.nickname && u.nickname === currentUser.nickname) || (u.id && u.id === currentUser.id));
           if (myEntry) {
-            if (typeof currentUser.rp === 'number' && currentUser.rp > myEntry.rp) {
+            if (currentUser.season === 4 && typeof currentUser.rp === 'number' && currentUser.rp > myEntry.rp) {
               myEntry.rp = currentUser.rp;
               myEntry.wins = Math.max(myEntry.wins || 0, currentUser.wins || 0);
               myEntry.losses = Math.max(myEntry.losses || 0, currentUser.losses || 0);
