@@ -12,7 +12,13 @@ class BattleFX {
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
-    this.loop();
+  }
+
+  ensureLoop() {
+    if (!this.animating) {
+      this.animating = true;
+      requestAnimationFrame(() => this.loop());
+    }
   }
 
   resize() {
@@ -45,6 +51,7 @@ class BattleFX {
     };
 
     this.projectiles.push(projectile);
+    this.ensureLoop();
   }
 
   // Create splash explosion at coordinates
@@ -94,6 +101,8 @@ class BattleFX {
       vy: -2.2,
       scale: 1.4
     });
+
+    this.ensureLoop();
   }
 
   triggerScreenShake(intensity = 10) {
@@ -107,6 +116,24 @@ class BattleFX {
   }
 
   loop() {
+    if (!this.canvas || !this.ctx) {
+      this.animating = false;
+      return;
+    }
+
+    const hasActive = (
+      this.projectiles.length > 0 ||
+      this.particles.length > 0 ||
+      this.shockwaves.length > 0 ||
+      this.floatingTexts.length > 0
+    );
+
+    if (!hasActive) {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      this.animating = false;
+      return;
+    }
+
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     const now = performance.now();
 
@@ -243,7 +270,9 @@ class BattleFX {
       this.ctx.restore();
     }
 
-    requestAnimationFrame(() => this.loop());
+    if (this.animating) {
+      requestAnimationFrame(() => this.loop());
+    }
   }
 }
 

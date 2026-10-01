@@ -2,8 +2,10 @@
 // Season 3 Storage Keys & Tier Definition
 // -------------------------------------------------------------
 const STORAGE_KEYS = {
-  USER: 'waterpang_s3_user',
-  LEADERBOARD: 'waterpang_s3_leaderboard',
+  USER: 'waterpang_s4_user',
+  LEADERBOARD: 'waterpang_s4_leaderboard',
+  LEGACY_S3_USER: 'waterpang_s3_user',
+  LEGACY_S3_LEADERBOARD: 'waterpang_s3_leaderboard',
   LEGACY_S2_USER: 'waterpang_s2_user',
   LEGACY_S2_LEADERBOARD: 'waterpang_s2_leaderboard',
   LEGACY_USER: 'waterpang_user',
@@ -222,57 +224,36 @@ function isProhibitedNickname(nickname, userId = null) {
 document.addEventListener('DOMContentLoaded', () => {
   battleFX = new BattleFX('battle-fx-canvas');
 
-  // Check Season 3 saved session or migrate seamlessly from Season 2 / Season 1
+  // Check Season 4 saved session or migrate cleanly from Season 3 / Season 2
   let saved = localStorage.getItem(STORAGE_KEYS.USER);
   if (!saved) {
-    const prevSaved = localStorage.getItem(STORAGE_KEYS.LEGACY_S2_USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
+    const prevSaved = localStorage.getItem(STORAGE_KEYS.LEGACY_S3_USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_S2_USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
     if (prevSaved) {
       try {
         const prevParsed = JSON.parse(prevSaved);
         if (prevParsed && prevParsed.nickname) {
-          console.log('[Season 3] Migrating account to Season 3:', prevParsed.nickname);
-          const s3Rp = (typeof prevParsed.rp === 'number' && prevParsed.rp >= 100) ? prevParsed.rp : 100;
-          const s3Wins = (typeof prevParsed.wins === 'number') ? prevParsed.wins : 0;
-          const s3Losses = (typeof prevParsed.losses === 'number') ? prevParsed.losses : 0;
-          const s3Draws = (typeof prevParsed.draws === 'number') ? prevParsed.draws : 0;
-          const s3User = {
+          console.log('[Season 4] Transitioning account to Season 4 (RP reset to 100):', prevParsed.nickname);
+          const s4User = {
             id: prevParsed.id || ('user_' + Math.random().toString(36).substring(2, 9)),
             nickname: prevParsed.nickname,
             password: prevParsed.password || 'saved_user',
-            rp: s3Rp,
-            wins: s3Wins,
-            losses: s3Losses,
-            draws: s3Draws,
-            season: 3,
+            rp: 100, // Explicit Season 4 reset
+            wins: (typeof prevParsed.wins === 'number') ? prevParsed.wins : 0,
+            losses: (typeof prevParsed.losses === 'number') ? prevParsed.losses : 0,
+            draws: (typeof prevParsed.draws === 'number') ? prevParsed.draws : 0,
+            season: 4,
+            season3_rp: prevParsed.rp || 100,
             season1_rp: prevParsed.season1_rp || 100,
             avatar: prevParsed.avatar || '👦',
-            tier: getTierInfo(s3Rp)
+            tier: getTierInfo(100)
           };
-          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(s3User));
-          saved = JSON.stringify(s3User);
+          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(s4User));
+          saved = JSON.stringify(s4User);
         }
       } catch (e) {
-        console.warn('Legacy migration error:', e);
+        console.warn('Season 4 migration error:', e);
       }
     }
-  } else {
-    // If user already has Season 3 saved session, verify if Season 2 key had higher RP and resurrect!
-    try {
-      const prevS2 = localStorage.getItem(STORAGE_KEYS.LEGACY_S2_USER);
-      if (prevS2) {
-        const p2 = JSON.parse(prevS2);
-        const cur = JSON.parse(saved);
-        if (p2 && cur && p2.nickname === cur.nickname && typeof p2.rp === 'number' && p2.rp > cur.rp) {
-          console.log(`[Season 3] Resurrecting higher RP from previous session: ${cur.rp} -> ${p2.rp}`);
-          cur.rp = p2.rp;
-          cur.wins = Math.max(cur.wins || 0, p2.wins || 0);
-          cur.losses = Math.max(cur.losses || 0, p2.losses || 0);
-          cur.tier = getTierInfo(cur.rp);
-          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(cur));
-          saved = JSON.stringify(cur);
-        }
-      }
-    } catch (e) {}
   }
 
   if (saved) {
@@ -737,6 +718,7 @@ async function cancelMatching() {
 let battleData = null;
 let battleSyncInterval = null;
 let currentClientRound = 0;
+let isRoundResolvedUI = false;
 
 function onMatchFound(data) {
   isMatchingInProgress = false;
@@ -813,6 +795,11 @@ function onMatchFound(data) {
             battleSyncInterval = null;
             return;
           }
+          // Sync round resolution if SSE event was missed or delayed
+          if (state.isRoundResolved && state.lastResult && !isRoundResolvedUI && currentClientRound === state.lastResult.round) {
+            console.log('[BattleSync] Syncing round resolution via polling fallback:', state.lastResult);
+            onRoundResult(state.lastResult);
+          }
           if (state.round > currentClientRound && state.quiz) {
             console.log('[BattleSync] Syncing round state via polling:', state.round);
             onRoundStart({
@@ -855,6 +842,7 @@ function onRoundStart(data) {
     if (!data || !data.quiz) return;
     currentClientRound = data.round;
     hasAnsweredCurrentRound = false;
+    isRoundResolvedUI = false;
 
     // Sync HP bars with server state
     if (data.p1 && data.p2 && currentUser) {
@@ -895,7 +883,11 @@ function onRoundStart(data) {
         const btn = document.createElement('button');
         btn.className = 'btn-option';
         btn.innerText = opt;
-        btn.addEventListener('click', () => submitAnswer(opt, btn));
+        btn.dataset.rawOpt = opt;
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          submitAnswer(opt, btn);
+        });
         container.appendChild(btn);
       });
     }
@@ -942,15 +934,21 @@ function startRoundTimer(seconds) {
 }
 
 async function submitAnswer(answer, clickedBtn) {
-  if (hasAnsweredCurrentRound || !currentRoomId) return;
+  if (hasAnsweredCurrentRound || !currentRoomId || isRoundResolvedUI) return;
   hasAnsweredCurrentRound = true;
 
-  // Disable all options
+  // Immediate visual feedback on the button touched/clicked!
+  if (clickedBtn) {
+    clickedBtn.classList.add('selected-pick');
+    clickedBtn.innerHTML = `${answer} <span class="pick-tag">선택됨 ⏳</span>`;
+  }
+
+  // Disable all options to prevent multiple submissions
   const buttons = document.querySelectorAll('.btn-option');
   buttons.forEach(b => b.disabled = true);
 
   try {
-    await fetch('/api/game/answer', {
+    const res = await fetch('/api/game/answer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -959,8 +957,39 @@ async function submitAnswer(answer, clickedBtn) {
         answer
       })
     });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.ok) {
+        if (data.isCorrect && data.result) {
+          onRoundResult(data.result);
+        } else if (data.isCorrect === false && data.wrongPayload) {
+          onWrongAnswer(data.wrongPayload);
+        }
+      }
+    } else {
+      console.warn('[Answer] Server returned status:', res.status);
+      if (!isRoundResolvedUI) {
+        hasAnsweredCurrentRound = false;
+        buttons.forEach(b => {
+          b.disabled = false;
+          b.classList.remove('selected-pick');
+          if (b.dataset.rawOpt) b.innerText = b.dataset.rawOpt;
+        });
+        showToast('⚠️ 전송 오류가 발생했습니다. 다시 눌러주세요!');
+      }
+    }
   } catch (e) {
     console.error('Answer send error:', e);
+    if (!isRoundResolvedUI) {
+      hasAnsweredCurrentRound = false;
+      buttons.forEach(b => {
+        b.disabled = false;
+        b.classList.remove('selected-pick');
+        if (b.dataset.rawOpt) b.innerText = b.dataset.rawOpt;
+      });
+      showToast('⚠️ 네트워크 연결 불안정. 다시 눌러주세요!');
+    }
   }
 }
 
@@ -975,8 +1004,10 @@ function onWrongAnswer(data) {
       // Mark clicked button red
       const buttons = document.querySelectorAll('.btn-option');
       buttons.forEach(b => {
-        if (b.innerText === data.userAnswer) {
+        const optText = b.dataset.rawOpt || b.innerText.replace(/선택됨 ⏳/g, '').trim();
+        if (optText === data.userAnswer) {
           b.classList.add('wrong-pick');
+          b.innerText = optText;
         }
         b.disabled = true;
       });
@@ -1003,12 +1034,17 @@ function onRoundResult(data) {
       explBox.innerHTML = `<strong>💡 정답: ${data.correctAnswer}</strong><br>${data.explanation || ''}`;
     }
 
+    if (isRoundResolvedUI && currentClientRound === data.round) return;
+    isRoundResolvedUI = true;
+
     // Highlight correct option button green
     const buttons = document.querySelectorAll('.btn-option');
     buttons.forEach(b => {
       b.disabled = true;
-      if (b.innerText === data.correctAnswer) {
+      const optText = b.dataset.rawOpt || b.innerText.replace(/선택됨 ⏳/g, '').trim();
+      if (optText === data.correctAnswer) {
         b.classList.add('correct-pick');
+        b.innerText = optText;
       }
     });
 
@@ -1201,7 +1237,7 @@ function onMatchOver(data) {
             draws: currentUser.draws || 0,
             win_rate: rate,
             tier: currentUser.tier,
-            season: 3
+            season: 4
           };
           if (idx !== -1) {
             cachedLb[idx] = updatedItem;
@@ -1357,14 +1393,14 @@ function renderLeaderboardItems(list, container) {
   `;
 
   if (!Array.isArray(list) || list.length === 0) {
-    if (modalTitle) modalTitle.innerText = '🏆 명예의 전당 (시즌3)';
+    if (modalTitle) modalTitle.innerText = '🏆 명예의 전당 (시즌4)';
     if (summaryBox) summaryBox.innerHTML = toolbarHtml;
     container.innerHTML = '<div style="text-align: center; color: #64748b; padding: 20px;">아직 기록된 학생이 없습니다. 첫 번째 챔피언이 되어보세요!</div>';
     return;
   }
 
   if (modalTitle) {
-    modalTitle.innerText = `🏆 명예의 전당 (시즌3) (전체 ${list.length}명)`;
+    modalTitle.innerText = `🏆 명예의 전당 (시즌4) (전체 ${list.length}명)`;
   }
 
   // Check currentUser rank
@@ -1399,7 +1435,7 @@ function renderLeaderboardItems(list, container) {
         <div class="my-rank-banner guest">
           <div class="my-rank-left">
             <div class="my-rank-label">⭐ ${currentUser.nickname}님의 순위</div>
-            <div class="my-rank-pos">시즌 3 등록됨 <span class="my-rank-total">(전체 ${list.length}명)</span></div>
+            <div class="my-rank-pos">시즌 4 등록됨 <span class="my-rank-total">(전체 ${list.length}명)</span></div>
           </div>
           <div class="my-rank-right">
             <div style="font-size: 12px; color: #64748b;">게임을 플레이하여 RP를 올려보세요! 🎮</div>
@@ -1454,7 +1490,7 @@ function renderLeaderboardItems(list, container) {
 async function openLeaderboard(forceRefresh = false) {
   const container = document.getElementById('leaderboard-container');
   const modalTitle = document.getElementById('leaderboard-modal-title');
-  if (modalTitle) modalTitle.innerText = '🏆 명예의 전당 (시즌3)';
+  if (modalTitle) modalTitle.innerText = '🏆 명예의 전당 (시즌4)';
 
   // Proactively sync currentUser if we have local score
   if (currentUser) {
@@ -1530,7 +1566,7 @@ async function adminExportLeaderboard() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `waterpang_s3_leaderboard_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `waterpang_s4_leaderboard_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
