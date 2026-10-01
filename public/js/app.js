@@ -1,6 +1,33 @@
 // -------------------------------------------------------------
-// Season 3 Storage Keys & Tier Definition
+// Season 4 Storage Keys & Tier Definition
 // -------------------------------------------------------------
+const CLIENT_S4_RESET_KEY = 'waterpang_s4_final_reset_v4_lock';
+(function enforceClientSeason4Reset() {
+  try {
+    if (!localStorage.getItem(CLIENT_S4_RESET_KEY)) {
+      console.log('[Season 4] Executing unconditional client reset to Season 4 (RP: 100)...');
+      localStorage.removeItem('waterpang_s4_leaderboard');
+      localStorage.removeItem('waterpang_s3_leaderboard');
+      localStorage.removeItem('waterpang_s2_leaderboard');
+      localStorage.removeItem('waterpang_leaderboard');
+
+      const savedUserStr = localStorage.getItem('waterpang_s4_user') || localStorage.getItem('waterpang_s3_user') || localStorage.getItem('waterpang_s2_user') || localStorage.getItem('waterpang_user');
+      if (savedUserStr) {
+        const u = JSON.parse(savedUserStr);
+        if (u && u.nickname) {
+          u.season3_rp = u.season3_rp || u.rp || 100;
+          u.rp = 100;
+          u.season = 4;
+          localStorage.setItem('waterpang_s4_user', JSON.stringify(u));
+        }
+      }
+      localStorage.setItem(CLIENT_S4_RESET_KEY, 'done');
+    }
+  } catch (e) {
+    console.warn('Client S4 reset error:', e);
+  }
+})();
+
 const STORAGE_KEYS = {
   USER: 'waterpang_s4_user',
   LEADERBOARD: 'waterpang_s4_leaderboard',
@@ -371,18 +398,21 @@ function setupEventListeners() {
     try {
       if (authMode === 'register') {
         let backupUser = null;
-        let leaderboardSnapshot = [];
         try {
-          const u = localStorage.getItem(STORAGE_KEYS.USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_S2_USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
-          if (u) backupUser = JSON.parse(u);
-          const lb = localStorage.getItem(STORAGE_KEYS.LEADERBOARD) || localStorage.getItem(STORAGE_KEYS.LEGACY_S2_LEADERBOARD) || localStorage.getItem(STORAGE_KEYS.LEGACY_LEADERBOARD);
-          if (lb) leaderboardSnapshot = JSON.parse(lb);
+          const u = localStorage.getItem(STORAGE_KEYS.USER);
+          if (u) {
+            backupUser = JSON.parse(u);
+            if (backupUser && backupUser.season !== 4) {
+              backupUser.season = 4;
+              backupUser.rp = 100;
+            }
+          }
         } catch(e){}
 
         const res = await fetch('/api/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nickname, password, backupUser, leaderboardSnapshot })
+          body: JSON.stringify({ nickname, password, backupUser })
         });
         const data = await res.json();
         if (data.ok && data.user) {
@@ -393,18 +423,21 @@ function setupEventListeners() {
         }
       } else {
         let backupUser = null;
-        let leaderboardSnapshot = [];
         try {
-          const u = localStorage.getItem(STORAGE_KEYS.USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_S2_USER) || localStorage.getItem(STORAGE_KEYS.LEGACY_USER);
-          if (u) backupUser = JSON.parse(u);
-          const lb = localStorage.getItem(STORAGE_KEYS.LEADERBOARD) || localStorage.getItem(STORAGE_KEYS.LEGACY_S2_LEADERBOARD) || localStorage.getItem(STORAGE_KEYS.LEGACY_LEADERBOARD);
-          if (lb) leaderboardSnapshot = JSON.parse(lb);
+          const u = localStorage.getItem(STORAGE_KEYS.USER);
+          if (u) {
+            backupUser = JSON.parse(u);
+            if (backupUser && backupUser.season !== 4) {
+              backupUser.season = 4;
+              backupUser.rp = 100;
+            }
+          }
         } catch(e){}
 
         const res = await fetch('/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nickname, password, backupUser, leaderboardSnapshot })
+          body: JSON.stringify({ nickname, password, backupUser })
         });
         const data = await res.json();
         if (data.ok && data.user) {
@@ -456,22 +489,12 @@ function updateUserData(user) {
 }
 
 function loginSuccess(user) {
-  // Anti-downgrade shield on login: If local currentUser has higher RP, preserve it ONLY within Season 4!
-  if (user && user.season === 4) {
-    if (currentUser && currentUser.nickname === user.nickname && currentUser.season === 4) {
-      if (typeof currentUser.rp === 'number' && currentUser.rp > (user.rp || 0)) {
-        console.log(`[Auth] Preserving higher local Season 4 RP on login: ${currentUser.rp} vs server ${user.rp}`);
-        user.rp = currentUser.rp;
-        user.wins = Math.max(user.wins || 0, currentUser.wins || 0);
-        user.losses = Math.max(user.losses || 0, currentUser.losses || 0);
-        user.draws = Math.max(user.draws || 0, currentUser.draws || 0);
-        user.tier = getTierInfo(user.rp);
-      }
-    } else {
-      // Transitioning to Season 4: accept server's Season 4 RP
-      if (typeof user.rp !== 'number') user.rp = 100;
-      user.tier = getTierInfo(user.rp);
+  if (user) {
+    if (typeof user.rp !== 'number' || user.season !== 4) {
+      user.rp = 100;
+      user.season = 4;
     }
+    user.tier = getTierInfo(user.rp);
   }
   updateUserData(user);
   showView('lobby');
@@ -507,18 +530,12 @@ async function syncUserWithServer(userToSync) {
       userToSync.rp = 100;
       userToSync.tier = getTierInfo(100);
     }
-    let leaderboardSnapshot = [];
-    try {
-      const cached = localStorage.getItem(STORAGE_KEYS.LEADERBOARD);
-      if (cached) leaderboardSnapshot = JSON.parse(cached);
-    } catch (e) {}
 
     const res = await fetch('/api/user/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        user: userToSync,
-        leaderboardSnapshot
+        user: userToSync
       })
     });
     const data = await res.json();
@@ -1567,13 +1584,13 @@ async function openLeaderboard(forceRefresh = false) {
         let list = data.leaderboard;
         if (currentUser && Array.isArray(list)) {
           const myEntry = list.find(u => (u.nickname && u.nickname === currentUser.nickname) || (u.id && u.id === currentUser.id));
-          if (myEntry) {
-            if (currentUser.season === 4 && typeof currentUser.rp === 'number' && currentUser.rp > myEntry.rp) {
-              myEntry.rp = currentUser.rp;
-              myEntry.wins = Math.max(myEntry.wins || 0, currentUser.wins || 0);
-              myEntry.losses = Math.max(myEntry.losses || 0, currentUser.losses || 0);
-              myEntry.tier = getTierInfo(myEntry.rp);
-            }
+          if (myEntry && myEntry.season === 4) {
+            currentUser.rp = myEntry.rp;
+            currentUser.wins = myEntry.wins;
+            currentUser.losses = myEntry.losses;
+            currentUser.draws = myEntry.draws;
+            currentUser.tier = getTierInfo(myEntry.rp);
+            localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(currentUser));
           }
         }
         const sorted = sortLeaderboardList(list);

@@ -481,6 +481,47 @@ function initSeason2Data() {
         `);
         console.log('[DB] ✅ All existing users successfully reset to Season 4 (100 RP baseline)!');
       }
+
+      // Guarantee Season 4 Final Reset Lock is executed unconditionally
+      const metaRowV4Final = db.prepare("SELECT value FROM season_metadata WHERE key = 'season_reset_v4_final_lock'").get();
+      if (!metaRowV4Final) {
+        console.log('[DB] Enforcing Season 4 Final Reset Lock on all users (RP = 100)...');
+        db.exec(`
+          UPDATE users 
+          SET season3_rp = CASE WHEN season3_rp IS NULL OR season3_rp = 100 THEN rp ELSE season3_rp END,
+              rp = 100,
+              season = 4;
+          INSERT OR REPLACE INTO season_metadata (key, value) VALUES ('season_reset_v4_final_lock', 'done');
+        `);
+        console.log('[DB] ✅ All existing users successfully locked to Season 4 100 RP baseline!');
+      }
+
+      // Guarantee Season 4 Unconditional Wipe is executed across all environments (including Render live deployment)
+      const metaRowV4Wipe = db.prepare("SELECT value FROM season_metadata WHERE key = 'season_4_rp100_unconditional_wipe'").get();
+      if (!metaRowV4Wipe) {
+        console.log('[DB] 🚨 Enforcing Season 4 Unconditional Wipe (RP = 100)...');
+        db.exec(`
+          UPDATE users 
+          SET season3_rp = CASE WHEN season3_rp IS NULL OR season3_rp = 100 THEN rp ELSE season3_rp END,
+              rp = 100,
+              season = 4;
+          INSERT OR REPLACE INTO season_metadata (key, value) VALUES ('season_4_rp100_unconditional_wipe', 'done');
+        `);
+        console.log('[DB] ✅ Unconditional wipe complete: All accounts reset to 100 RP for Season 4!');
+      }
+    }
+    if (useJsonFallback) {
+      if (!jsonStore.season_metadata) jsonStore.season_metadata = {};
+      if (!jsonStore.season_metadata.season_4_rp100_unconditional_wipe) {
+        (jsonStore.users || []).forEach(u => {
+          u.season3_rp = u.season3_rp || u.rp || 100;
+          u.rp = 100;
+          u.season = 4;
+        });
+        jsonStore.season_metadata.season_reset_v4_final_lock = 'done';
+        jsonStore.season_metadata.season_4_rp100_unconditional_wipe = 'done';
+        saveJsonStore();
+      }
     }
   } catch (e) {
     console.error('[DB] Season 2 initialization error:', e.message);
@@ -927,31 +968,20 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
     let newLosses = existing.losses;
     let newDraws = existing.draws;
 
-    // Allow Season 3 & 2 points to update users!
-    // Absolute Anti-Downgrade: NEVER downgrade RP, wins, losses, draws!
-    const isCurrentSeason = (userData.season === 4);
-
-    if (isCurrentSeason) {
-      if (typeof userData.rp === 'number' && userData.rp > existing.rp) {
-        newRp = userData.rp;
-        needsUpdate = true;
-      }
-      if (typeof userData.wins === 'number' && userData.wins > existing.wins) {
-        newWins = userData.wins;
-        needsUpdate = true;
-      }
-      if (typeof userData.losses === 'number' && userData.losses > existing.losses) {
-        newLosses = userData.losses;
-        needsUpdate = true;
-      }
-      if (typeof userData.draws === 'number' && userData.draws > existing.draws) {
-        newDraws = userData.draws;
-        needsUpdate = true;
-      }
+    if (existing.season !== 4) {
+      existing.season3_rp = existing.rp || 100;
+      newRp = 100;
+      needsUpdate = true;
     }
 
-    if (needsUpdate || (existing.password === 'saved_user' && userData.password && userData.password !== 'saved_user')) {
-      const updatePass = (existing.password === 'saved_user' && userData.password && userData.password !== 'saved_user') ? userData.password : existing.password;
+    // In Season 4: The server database is strictly authoritative for RP!
+    // Client backups must never elevate RP above the server database value.
+    const updatePass = (existing.password === 'saved_user' && userData.password && userData.password !== 'saved_user') ? userData.password : existing.password;
+    if (updatePass !== existing.password) {
+      needsUpdate = true;
+    }
+
+    if (needsUpdate) {
       if (useJsonFallback) {
         const idx = jsonStore.users.findIndex(u => u.id === existing.id);
         if (idx !== -1) {
@@ -971,11 +1001,11 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
   } else {
     const id = userData.id || crypto.randomUUID();
     const password = userData.password || '1234';
-    // If incoming user is from earlier season, start Season 4 at 100 RP!
-    const rp = ((userData.season === 4) && typeof userData.rp === 'number') ? userData.rp : 100;
-    const wins = ((userData.season === 4) && typeof userData.wins === 'number') ? userData.wins : 0;
-    const losses = ((userData.season === 4) && typeof userData.losses === 'number') ? userData.losses : 0;
-    const draws = ((userData.season === 4) && typeof userData.draws === 'number') ? userData.draws : 0;
+    // Any restored account starts Season 4 at 100 RP!
+    const rp = 100;
+    const wins = typeof userData.wins === 'number' ? userData.wins : 0;
+    const losses = typeof userData.losses === 'number' ? userData.losses : 0;
+    const draws = typeof userData.draws === 'number' ? userData.draws : 0;
     const createdAt = userData.created_at || new Date().toISOString();
 
     if (useJsonFallback) {
@@ -983,38 +1013,35 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
         id,
         nickname: cleanNick,
         password,
-        rp,
+        rp: 100,
         wins,
         losses,
         draws,
-        season: 4, created_at: createdAt
+        season: 4,
+        season3_rp: userData.rp || 100,
+        created_at: createdAt
       });
       saveJsonStore();
     } else {
       try {
         const stmt = db.prepare(`
-          INSERT INTO users (id, nickname, password, rp, wins, losses, draws, season, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 3, datetime('now', 'localtime'))
+          INSERT INTO users (id, nickname, password, rp, wins, losses, draws, season, season3_rp, created_at)
+          VALUES (?, ?, ?, 100, ?, ?, ?, 4, ?, datetime('now', 'localtime'))
         `);
-        stmt.run(id, cleanNick, password, rp, wins, losses, draws);
+        stmt.run(id, cleanNick, password, wins, losses, draws, userData.rp || 100);
       } catch (e) {
         console.error('[DB] Resurrect error:', e.message);
       }
     }
   }
 
-  // Restore cached leaderboard peers with Absolute Highest-Value Preservation (Never Downgrade!)
+  // In Season 4, existing database records are authoritative!
+  // Client snapshots MUST NEVER overwrite existing players' RP back to Season 3!
   if (Array.isArray(leaderboardSnapshot)) {
     for (const item of leaderboardSnapshot) {
       if (item && item.nickname) {
         const nick = item.nickname.trim();
         if (isProhibitedNickname(nick, item.id).prohibited) continue;
-
-        const isItemValid = (item.season === 3 || item.season === 2 || !item.season);
-        const peerRp = (isItemValid && typeof item.rp === 'number') ? item.rp : 100;
-        const peerWins = (isItemValid && typeof item.wins === 'number') ? item.wins : 0;
-        const peerLosses = (isItemValid && typeof item.losses === 'number') ? item.losses : 0;
-        const peerDraws = (isItemValid && typeof item.draws === 'number') ? item.draws : 0;
 
         const found = getUserByNickname(nick);
         if (!found) {
@@ -1024,48 +1051,22 @@ function restoreOrSyncUser(userData, leaderboardSnapshot) {
               id: lId,
               nickname: nick,
               password: 'saved_user',
-              rp: peerRp,
-              wins: peerWins,
-              losses: peerLosses,
-              draws: peerDraws,
-              season: 3,
+              rp: 100,
+              wins: item.wins || 0,
+              losses: item.losses || 0,
+              draws: item.draws || 0,
+              season: 4,
+              season3_rp: item.rp || 100,
               created_at: new Date().toISOString()
             });
           } else {
             try {
               const stmt = db.prepare(`
-                INSERT INTO users (id, nickname, password, rp, wins, losses, draws, season, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 3, datetime('now', 'localtime'))
+                INSERT INTO users (id, nickname, password, rp, wins, losses, draws, season, season3_rp, created_at)
+                VALUES (?, ?, 'saved_user', 100, ?, ?, ?, 4, ?, datetime('now', 'localtime'))
               `);
-              stmt.run(lId, nick, 'saved_user', peerRp, peerWins, peerLosses, peerDraws);
+              stmt.run(lId, nick, item.wins || 0, item.losses || 0, item.draws || 0, item.rp || 100);
             } catch (e) {}
-          }
-        } else if (isItemValid) {
-          // Absolute Max Merge: Never allow older snapshot to downgrade a peer's RP!
-          const higherRp = Math.max(found.rp, peerRp);
-          const higherWins = Math.max(found.wins, peerWins);
-          const higherLosses = Math.max(found.losses, peerLosses);
-          const higherDraws = Math.max(found.draws, peerDraws);
-
-          if (higherRp > found.rp || higherWins > found.wins) {
-            if (useJsonFallback) {
-              const idx = jsonStore.users.findIndex(u => u.id === found.id);
-              if (idx !== -1) {
-                jsonStore.users[idx].rp = higherRp;
-                jsonStore.users[idx].wins = higherWins;
-                jsonStore.users[idx].losses = higherLosses;
-                jsonStore.users[idx].draws = higherDraws;
-                jsonStore.users[idx].season = 4;
-              }
-            } else {
-              try {
-                db.prepare(`
-                  UPDATE users 
-                  SET rp = ?, wins = ?, losses = ?, draws = ?, season = 4 
-                  WHERE id = ?
-                `).run(higherRp, higherWins, higherLosses, higherDraws, found.id);
-              } catch (e) {}
-            }
           }
         }
       }
