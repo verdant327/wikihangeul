@@ -524,6 +524,23 @@ function initSeason2Data() {
         `);
         console.log('[DB] ✅ Unconditional wipe complete: All accounts reset to 100 RP for Season 5!');
       }
+
+      // Guarantee Season 5 Final Authoritative Reset Lock is executed unconditionally
+      const metaRowV5Final = db.prepare("SELECT value FROM season_metadata WHERE key = 'season_5_final_authoritative_rp100_reset'").get();
+      if (!metaRowV5Final) {
+        console.log('[DB] 🚨 Enforcing Season 5 Final Authoritative Reset (All RP = 100)...');
+        db.exec(`
+          UPDATE users 
+          SET season4_rp = CASE WHEN season4_rp IS NULL OR season4_rp = 100 THEN rp ELSE season4_rp END,
+              rp = 100,
+              wins = 0,
+              losses = 0,
+              draws = 0,
+              season = 5;
+          INSERT OR REPLACE INTO season_metadata (key, value) VALUES ('season_5_final_authoritative_rp100_reset', 'done');
+        `);
+        console.log('[DB] ✅ All accounts unconditionally reset to Season 5 (100 RP, 0W 0L 0D)!');
+      }
     }
     if (useJsonFallback) {
       if (!jsonStore.season_metadata) jsonStore.season_metadata = {};
@@ -545,6 +562,18 @@ function initSeason2Data() {
         });
         jsonStore.season_metadata.season_reset_v5_final_lock = 'done';
         jsonStore.season_metadata.season_5_rp100_unconditional_wipe = 'done';
+        saveJsonStore();
+      }
+      if (!jsonStore.season_metadata.season_5_final_authoritative_rp100_reset) {
+        (jsonStore.users || []).forEach(u => {
+          u.season4_rp = u.season4_rp || u.rp || 100;
+          u.rp = 100;
+          u.wins = 0;
+          u.losses = 0;
+          u.draws = 0;
+          u.season = 5;
+        });
+        jsonStore.season_metadata.season_5_final_authoritative_rp100_reset = 'done';
         saveJsonStore();
       }
     }
@@ -896,29 +925,57 @@ function getSeason1HallOfFame() {
   }
 }
 
-function resetToSeason2() {
+function resetToSeason5() {
   if (useJsonFallback) {
     (jsonStore.users || []).forEach(u => {
-      if (!u.season1_rp || u.season1_rp === 100) u.season1_rp = u.rp;
+      u.season4_rp = u.season4_rp || u.rp || 100;
       u.rp = 100;
       u.wins = 0;
       u.losses = 0;
       u.draws = 0;
-      u.season = 3;
+      u.season = 5;
     });
     saveJsonStore();
   } else {
     db.exec(`
       UPDATE users 
-      SET season1_rp = CASE WHEN season1_rp IS NULL OR season1_rp = 100 THEN rp ELSE season1_rp END,
+      SET season4_rp = CASE WHEN season4_rp IS NULL OR season4_rp = 100 THEN rp ELSE season4_rp END,
           rp = 100,
           wins = 0,
           losses = 0,
           draws = 0,
-          season = 3
+          season = 5
     `);
   }
-  console.log('[DB] Reset all users to Season 3 baseline.');
+  console.log('[DB] Reset all users to Season 5 baseline (100 RP).');
+}
+
+function resetUserToSeason5(userId) {
+  if (!userId) return false;
+  if (useJsonFallback) {
+    const idx = (jsonStore.users || []).findIndex(u => u.id === userId);
+    if (idx !== -1) {
+      jsonStore.users[idx].season4_rp = jsonStore.users[idx].season4_rp || jsonStore.users[idx].rp || 100;
+      jsonStore.users[idx].rp = 100;
+      jsonStore.users[idx].season = 5;
+      saveJsonStore();
+      return true;
+    }
+  } else {
+    try {
+      db.prepare(`
+        UPDATE users 
+        SET season4_rp = CASE WHEN season4_rp IS NULL OR season4_rp = 100 THEN rp ELSE season4_rp END,
+            rp = 100,
+            season = 5
+        WHERE id = ?
+      `).run(userId);
+      return true;
+    } catch (e) {
+      console.error('[DB] resetUserToSeason5 error:', e.message);
+    }
+  }
+  return false;
 }
 
 function recordWrongAnswer(userId, quizId, userAnswer, correctAnswer) {
@@ -1125,8 +1182,11 @@ module.exports = {
   getMatchHistory,
   getLeaderboard,
   getSeason1HallOfFame,
-  resetToSeason2,
-  resetToSeason3: resetToSeason2,
+  resetToSeason5,
+  resetUserToSeason5,
+  resetToSeason2: resetToSeason5,
+  resetToSeason3: resetToSeason5,
+  resetToSeason4: resetToSeason5,
   recordWrongAnswer,
   saveWrongAnswer: recordWrongAnswer,
   getWrongAnswers,
